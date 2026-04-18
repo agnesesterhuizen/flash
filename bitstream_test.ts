@@ -1,70 +1,111 @@
-import { assertEquals } from "https://deno.land/std@0.187.0/testing/asserts.ts";
+import {
+  assertEquals,
+  assertThrows,
+} from "https://deno.land/std@0.187.0/testing/asserts.ts";
 import { Bitstream } from "./bitstream.ts";
 
-// Deno.test("Bitstream.read - bit in first byte, set", () => {
-//   const bs = new Bitstream(new Uint8Array([0b10]));
-//   assertEquals(1, bs.read(1));
-// });
+Deno.test("Bitstream.fromBuffer exposes the full bit length", () => {
+  const bs = Bitstream.fromBuffer(new Uint8Array([0xaa, 0x55]));
 
-// Deno.test("Bitstream.read - bit in first byte, unset", () => {
-//   const bs = new Bitstream(new Uint8Array([0b01]));
-//   assertEquals(0, bs.read(1));
-// });
+  assertEquals(16, bs.available);
+  assertEquals(0, bs.index);
+});
 
-// Deno.test("Bitstream.read - bit in second byte, set", () => {
-//   const bs = new Bitstream(new Uint8Array([0, 0b100]));
-//   assertEquals(1, bs.read(8 + 2));
-// });
+Deno.test(
+  "Bitstream.read consumes bits sequentially across byte boundaries",
+  () => {
+    const bs = Bitstream.fromBuffer(new Uint8Array([0b1010_1100, 0b1111_0000]));
 
-// Deno.test("Bitstream.read - bit in second byte, unset", () => {
-//   const bs = new Bitstream(new Uint8Array([0, 0b10]));
-//   assertEquals(0, bs.read(8 + 0));
-// });
+    assertEquals(0b101, bs.read(3));
+    assertEquals(13, bs.available);
+    assertEquals(0b01100, bs.read(5));
+    assertEquals(8, bs.available);
+    assertEquals(0b1111, bs.read(4));
+    assertEquals(0b0000, bs.read(4));
+    assertEquals(0, bs.available);
+  },
+);
 
-// const readRangeTestCases = [
-//   { input: [0b1], expectedResult: 1, startIndex: 7, length: 1 },
-//   { input: [0b11], expectedResult: 3, startIndex: 6, length: 2 },
-//   { input: [0b110], expectedResult: 6, startIndex: 5, length: 3 },
-//   { input: [0b101], expectedResult: 5, startIndex: 5, length: 3 },
-//   { input: [0b0100_0000], expectedResult: 1, startIndex: 1, length: 1 },
-//   { input: [0b1000_0000], expectedResult: 1, startIndex: 0, length: 1 },
-//   {
-//     input: [0b0000_0001, 0b1000_0000],
-//     expectedResult: 3,
-//     startIndex: 7,
-//     length: 2,
-//   },
-// ];
+Deno.test(
+  "Bitstream.read throws when reading past the end of the buffer",
+  () => {
+    const bs = Bitstream.fromBuffer(new Uint8Array([0b1010_0000]));
 
-// for (const testCase of readRangeTestCases) {
-//   Deno.test(
-//     `Bitstream.readRange(${testCase.startIndex}, ${testCase.length}) with input ${testCase.input} => ${testCase.expectedResult}`,
-//     () => {
-//       const bs = new Bitstream(new Uint8Array(testCase.input));
-//       assertEquals(
-//         testCase.expectedResult,
-//         bs.readRange(testCase.startIndex, testCase.length)
-//       );
-//     }
-//   );
-// }
+    bs.read(8);
 
-// Deno.test("Bitstream.readRange - rect", () => {
-//   const expectedNBits = 15;
-//   const expected = { xMin: 0, xMax: 15200, yMin: 0, yMax: 12000 };
+    assertThrows(() => bs.read(1), Error, "end of buffer");
+  },
+);
 
-//   const rectBuffer = new Uint8Array([120, 0, 7, 108, 0, 0, 23, 112, 0]);
-//   const bs = new Bitstream(rectBuffer);
+Deno.test("Bitstream.readU8 reads one byte", () => {
+  const bs = Bitstream.fromBuffer(new Uint8Array([0xab]));
 
-//   // Nbits UB[5] Bits in each rect value field
-//   const nBits = bs.readRange(0, 5);
-//   assertEquals(expectedNBits, nBits);
-//   // Xmin SB[Nbits] x minimum position for rect
-//   assertEquals(expected.xMin, bs.readRange(5 + nBits * 0, nBits));
-//   // Xmax SB[Nbits] x maximum position for rect
-//   assertEquals(expected.xMax, bs.readRange(5 + nBits * 1, nBits));
-//   // Ymin SB[Nbits] y minimum position for rect
-//   assertEquals(expected.yMin, bs.readRange(5 + nBits * 2, nBits));
-//   // Ymax SB[Nbits] y maximum position for rect
-//   assertEquals(expected.yMax, bs.readRange(5 + nBits * 3, nBits));
-// });
+  assertEquals(0xab, bs.readU8());
+  assertEquals(0, bs.available);
+});
+
+Deno.test("Bitstream.readU16 reads little-endian values", () => {
+  const bs = Bitstream.fromBuffer(new Uint8Array([0x34, 0x12]));
+
+  assertEquals(0x1234, bs.readU16());
+  assertEquals(0, bs.available);
+});
+
+Deno.test("Bitstream.readU32 reads little-endian values", () => {
+  const bs = Bitstream.fromBuffer(new Uint8Array([0x78, 0x56, 0x34, 0x12]));
+
+  assertEquals(0x12345678, bs.readU32());
+  assertEquals(0, bs.available);
+});
+
+Deno.test("Bitstream.readu32 is an alias for readU32", () => {
+  const bs = Bitstream.fromBuffer(new Uint8Array([0x78, 0x56, 0x34, 0x12]));
+
+  assertEquals(0x12345678, bs.readu32());
+  assertEquals(0, bs.available);
+});
+
+Deno.test("Bitstream.readSync delegates to read", () => {
+  const bs = Bitstream.fromBuffer(new Uint8Array([0b1011_0000]));
+
+  assertEquals(0b1011, bs.readSync(4));
+  assertEquals(4, bs.available);
+});
+
+Deno.test(
+  "Bitstream.readSigned currently reinterprets the value through a Uint32Array",
+  () => {
+    const bs = Bitstream.fromBuffer(new Uint8Array([0xff]));
+
+    assertEquals(4278190080, bs.readSigned(8));
+    assertEquals(0, bs.available);
+  },
+);
+
+Deno.test("Bitstream.read returns the first bit when it is set", () => {
+  const bs = Bitstream.fromBuffer(new Uint8Array([0b1000_0000]));
+
+  assertEquals(1, bs.read(1));
+  assertEquals(7, bs.available);
+});
+
+Deno.test("Bitstream.read returns the first bit when it is unset", () => {
+  const bs = Bitstream.fromBuffer(new Uint8Array([0b0100_0000]));
+
+  assertEquals(0, bs.read(1));
+  assertEquals(7, bs.available);
+});
+
+Deno.test("Bitstream.read can reach a set bit in the second byte", () => {
+  const bs = Bitstream.fromBuffer(new Uint8Array([0x00, 0b0010_0000]));
+
+  assertEquals(0b00000000001, bs.read(11));
+  assertEquals(5, bs.available);
+});
+
+Deno.test("Bitstream.read can reach an unset bit in the second byte", () => {
+  const bs = Bitstream.fromBuffer(new Uint8Array([0xff, 0b0100_0000]));
+
+  assertEquals(0b111111110, bs.read(9));
+  assertEquals(7, bs.available);
+});

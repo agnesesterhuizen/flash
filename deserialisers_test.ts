@@ -2,42 +2,21 @@ import { assertEquals } from "https://deno.land/std@0.187.0/testing/asserts.ts";
 import { headerDeserialiser, rectDeserialiser } from "./deserialisers.ts";
 import { Bitstream } from "./bitstream.ts";
 
-// Deno.test("rectDeserialiser", () => {
-//   const buffer = new Uint8Array([120, 0, 5, 95, 0, 0, 15, 160, 0]);
-//   const s = rectDeserialiser.deserialise(Bitstream.fromBuffer(buffer));
+Deno.test("rectDeserialiser", () => {
+  const buffer = new Uint8Array([120, 0, 5, 95, 0, 0, 15, 160, 0]);
+  const s = rectDeserialiser.deserialise(Bitstream.fromBuffer(buffer));
 
-//   console.log("s", s);
-
-//   assertEquals(15, s.nBits);
-//   assertEquals(0, s.xMin);
-//   assertEquals(11000, s.xMax);
-//   assertEquals(0, s.yMin);
-//   assertEquals(8000, s.yMax);
-// });
+  assertEquals(15, s.nBits);
+  assertEquals(0, s.xMin);
+  assertEquals(11000, s.xMax);
+  assertEquals(0, s.yMin);
+  assertEquals(8000, s.yMax);
+});
 
 Deno.test("headerDeserialiser", () => {
   const buffer = new Uint8Array([
-    0x46,
-    0x57,
-    0x53,
-    0x20,
-    0x91,
-    0x00,
-    0x00,
-    0x00,
-    0x78,
-    0x00,
-    0x05,
-    0x5f,
-    0x00,
-    0x00,
-    0x0f,
-    0xa0,
-    0x00,
-    0x18,
-    0x00,
-    0x01,
-    0x00,
+    0x46, 0x57, 0x53, 0x20, 0x91, 0x00, 0x00, 0x00, 0x78, 0x00, 0x05, 0x5f,
+    0x00, 0x00, 0x0f, 0xa0, 0x00, 0x18, 0x00, 0x01, 0x00,
   ]);
 
   const s = headerDeserialiser.deserialise(Bitstream.fromBuffer(buffer));
@@ -52,6 +31,25 @@ Deno.test("headerDeserialiser", () => {
   assertEquals(11000, s.frameSize.xMax);
   assertEquals(0, s.frameSize.yMin);
   assertEquals(8000, s.frameSize.yMax);
+  assertEquals(0, s.frameSizePadding);
+  assertEquals(24, s.frameRate);
+  assertEquals(1, s.frameCount);
+});
+
+Deno.test("headerDeserialiser reads non-zero frame size padding bits", () => {
+  const buffer = new Uint8Array([
+    0x46, 0x57, 0x53, 0x20, 0x10, 0x00, 0x00, 0x00, 0x0a, 0xd5, 0x18, 0x00,
+    0x01, 0x00,
+  ]);
+
+  const s = headerDeserialiser.deserialise(Bitstream.fromBuffer(buffer));
+
+  assertEquals(1, s.frameSize.nBits);
+  assertEquals(0, s.frameSize.xMin);
+  assertEquals(1, s.frameSize.xMax);
+  assertEquals(0, s.frameSize.yMin);
+  assertEquals(1, s.frameSize.yMax);
+  assertEquals(0b1010101, s.frameSizePadding);
   assertEquals(24, s.frameRate);
   assertEquals(1, s.frameCount);
 });
