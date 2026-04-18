@@ -1,5 +1,5 @@
 import { Bitstream } from "./bitstream.ts";
-import { bit, bytes, DeserialiserFactory, u8 } from "./struct.ts";
+import { bit, bytes, DeserialiserFactory, sbytes, u8 } from "./struct.ts";
 import { rectDeserialiser } from "./deserialisers.ts";
 
 const isParserDebugEnabled = () =>
@@ -412,8 +412,6 @@ type Tag =
       type: "End";
     };
 
-const RECT_SIZE = 9;
-
 const readU16LE = (buffer: Uint8Array, offset: number) =>
   new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength).getUint16(
     offset,
@@ -452,34 +450,36 @@ const matrixDeserialiser = new DeserialiserFactory<MatrixStruct>()
   .conditionalField(
     (x) => x.hasScale === 1,
     "scaleX",
-    (x) => bytes(x.nScaleBits as number),
+    (x) => sbytes(x.nScaleBits as number),
   )
   .conditionalField(
     (x) => x.hasScale === 1,
     "scaleY",
-    (x) => bytes(x.nScaleBits as number),
+    (x) => sbytes(x.nScaleBits as number),
   )
   .field("hasRotate", bit())
   .conditionalField((x) => x.hasRotate === 1, "nRotateBits", bytes(5))
   .conditionalField(
     (x) => x.hasRotate === 1,
     "rotateSkew0",
-    (x) => bytes(x.nRotateBits as number),
+    (x) => sbytes(x.nRotateBits as number),
   )
   .conditionalField(
     (x) => x.hasRotate === 1,
     "rotateSkew1",
-    (x) => bytes(x.nRotateBits as number),
+    (x) => sbytes(x.nRotateBits as number),
   )
   .field("nTranslateBits", bytes(5))
-  .field("translateX", (x) => bytes(x.nTranslateBits as number))
-  .field("translateY", (x) => bytes(x.nTranslateBits as number))
+  .field("translateX", (x) => sbytes(x.nTranslateBits as number))
+  .field("translateY", (x) => sbytes(x.nTranslateBits as number))
   .build();
 
-const parseMatrixRecord = (bitstream: Bitstream): Matrix => {
+export const parseMatrixRecord = (bitstream: Bitstream): Matrix => {
   const s = matrixDeserialiser.deserialise(bitstream);
   const withDefault = (value: number | undefined, fallback: number) =>
     value === undefined || Number.isNaN(value) ? fallback : value;
+  const fbDefault = (value: number | undefined, fallback: number) =>
+    value === undefined || Number.isNaN(value) ? fallback : value / 65536;
 
   const padding = (8 - (bitstream.index % 8)) % 8;
   if (padding > 0) {
@@ -487,10 +487,10 @@ const parseMatrixRecord = (bitstream: Bitstream): Matrix => {
   }
 
   return {
-    scaleX: withDefault(s.scaleX as number | undefined, 1),
-    scaleY: withDefault(s.scaleY as number | undefined, 1),
-    rotateSkew0: withDefault(s.rotateSkew0 as number | undefined, 0),
-    rotateSkew1: withDefault(s.rotateSkew1 as number | undefined, 0),
+    scaleX: fbDefault(s.scaleX as number | undefined, 1),
+    scaleY: fbDefault(s.scaleY as number | undefined, 1),
+    rotateSkew0: fbDefault(s.rotateSkew0 as number | undefined, 0),
+    rotateSkew1: fbDefault(s.rotateSkew1 as number | undefined, 0),
     translateX: withDefault(s.translateX as number | undefined, 0),
     translateY: withDefault(s.translateY as number | undefined, 0),
   };
@@ -541,16 +541,16 @@ export const parseHeader = (buffer: Uint8Array): SWFHeader => {
 
   // *** compression applies from this point but assuming uncompressed for now ***
 
-  // FrameSize (RECT)
-  const rb = buffer.slice(8, 8 + RECT_SIZE);
-  const bitstream = new Bitstream(rb);
+  // FrameSize (RECT) — variable size, byte-aligned
+  const bitstream = new Bitstream(buffer.slice(8));
   const frameSize = parseRect(bitstream);
 
-  // FrameRate
-  const frameRate = buffer[18];
+  // FrameRate — UI16, 8.8 fixed point (low byte = fraction, high byte = integer)
+  const frameRateRaw = bitstream.readU16();
+  const frameRate = (frameRateRaw >> 8) + (frameRateRaw & 0xff) / 256;
 
-  // FrameCount
-  const frameCount = new Uint16Array(buffer.slice(19, 21))[0];
+  // FrameCount — UI16
+  const frameCount = bitstream.readU16();
 
   return {
     compressionType,
@@ -669,6 +669,43 @@ const parseRGBA = (n: number): RGBA => {
   };
 };
 
+const parseFillStyle = (
+  bitstream: Bitstream,
+  shapeType: ShapeType,
+): FillStyle => {
+  const typeCode = bitstream.readSync(8);
+
+  if (!(typeCode in FillStyleCodeNames)) {
+    throw `parseFillStyle: encountered unknown fill style type: ${typeCode}`;
+  }
+
+  const type = FillStyleCodeNames[typeCode];
+
+  switch (type) {
+    case "SOLID": {
+      const isRGBA = shapeType === "Shape3" || shapeType === "Shape4";
+      const colorBytes = isRGBA ? 4 : 3;
+      const colorValue = bitstream.readSync(colorBytes * 8);
+      const color = isRGBA ? parseRGBA(colorValue) : parseRGB(colorValue);
+
+      return { type, color };
+    }
+    case "LINEAR_GRADIENT":
+    case "RADIAL_GRADIENT":
+    case "FOCAL_RADIAL_GRADIENT":
+      throw `parseFillStyle: unsupported gradient fill style type: ${type}`;
+    case "REPEATING_BITMAP":
+    case "CLIPPED_BITMAP":
+    case "NON_SMOOTHED_REPEATING_BITMAP":
+    case "NON_SMOOTHED_CLIPPED_BITMAP": {
+      const bitmapId = bitstream.readU16();
+      const bitmapMatrix = parseMatrixRecord(bitstream);
+
+      return { type, bitmapId, bitmapMatrix };
+    }
+  }
+};
+
 export const parseFillStyleArray = (
   bitstream: Bitstream,
   shapeType: ShapeType,
@@ -690,46 +727,7 @@ export const parseFillStyleArray = (
   const fillStyles: FillStyle[] = [];
 
   while (fillStyles.length < itemCount) {
-    const typeCode = bitstream.readSync(8);
-
-    if (!(typeCode in FillStyleCodeNames)) {
-      throw `parseFillStyleArray: encountered unknown fill style type: ${typeCode}`;
-    }
-
-    const type = FillStyleCodeNames[typeCode];
-
-    switch (type) {
-      case "SOLID": {
-        const isRGBA = shapeType === "Shape3";
-        const colorBytes = isRGBA ? 4 : 3;
-        const colorValue = bitstream.readSync(colorBytes * 8);
-        const color = isRGBA ? parseRGBA(colorValue) : parseRGB(colorValue);
-
-        fillStyles.push({
-          type,
-          color,
-        });
-        break;
-      }
-      case "LINEAR_GRADIENT":
-      case "RADIAL_GRADIENT":
-      case "FOCAL_RADIAL_GRADIENT":
-        throw `parseFillStyleArray: unsupported gradient fill style type: ${type}`;
-      case "REPEATING_BITMAP":
-      case "CLIPPED_BITMAP":
-      case "NON_SMOOTHED_REPEATING_BITMAP":
-      case "NON_SMOOTHED_CLIPPED_BITMAP": {
-        const bitmapId = bitstream.readU16();
-        const bitmapMatrix = parseMatrixRecord(bitstream);
-
-        fillStyles.push({
-          type,
-          bitmapId,
-          bitmapMatrix,
-        });
-        break;
-      }
-    }
+    fillStyles.push(parseFillStyle(bitstream, shapeType));
   }
 
   return fillStyles;
@@ -784,7 +782,7 @@ export const parseLineStyleArray = (
       };
 
       if (hasFillFlag) {
-        lineStyle.fillType = parseFillStyleArray(bitstream, shapeType)[0];
+        lineStyle.fillType = parseFillStyle(bitstream, shapeType);
       } else {
         lineStyle.color = parseRGBA(bitstream.readSync(32));
       }

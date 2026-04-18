@@ -60,7 +60,10 @@ export class Bitstream {
 
   readSigned(width: number): number {
     const n = this.read(width);
-    const buf = new Uint32Array([n]);
-    return new DataView(buf.buffer).getUint32(0);
+    // Two's complement: if the sign bit is set, extend it
+    if (width > 0 && (n & (1 << (width - 1))) !== 0) {
+      return n - (1 << width);
+    }
+    return n;
   }
 }

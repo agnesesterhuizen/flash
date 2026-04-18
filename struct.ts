@@ -42,6 +42,10 @@ type DataType =
       width: number;
     }
   | {
+      type: "SIGNED_BYTES";
+      width: number;
+    }
+  | {
       type: "U8";
     }
   | {
@@ -62,6 +66,10 @@ type DataType =
 
 export const bit = (): DataType => ({ type: "BYTES", width: 1 });
 export const bytes = (width: number): DataType => ({ type: "BYTES", width });
+export const sbytes = (width: number): DataType => ({
+  type: "SIGNED_BYTES",
+  width,
+});
 export const u8 = (): DataType => ({ type: "U8" });
 export const u16 = (): DataType => ({ type: "U16" });
 export const u32 = (): DataType => ({ type: "U32" });
@@ -96,6 +104,9 @@ export class Deserialiser<T extends Struct> implements Deserialisable {
       switch (t.type) {
         case "BYTES": {
           return bs.read(t.width);
+        }
+        case "SIGNED_BYTES": {
+          return bs.readSigned(t.width);
         }
         case "U8":
           return bs.readU8();

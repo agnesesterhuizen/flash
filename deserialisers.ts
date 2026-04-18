@@ -1,4 +1,4 @@
-import { bytes, DeserialiserFactory, u16, u32, u8 } from "./struct.ts";
+import { bytes, sbytes, DeserialiserFactory, u16, u32, u8 } from "./struct.ts";
 
 export type RectStruct = {
   nBits: number; // Nbits UB[5] Bits in each rect value field
@@ -10,10 +10,10 @@ export type RectStruct = {
 
 export const rectDeserialiser = new DeserialiserFactory<RectStruct>()
   .field("nBits", bytes(5))
-  .field("xMin", (x) => bytes(x.nBits as number))
-  .field("xMax", (x) => bytes(x.nBits as number))
-  .field("yMin", (x) => bytes(x.nBits as number))
-  .field("yMax", (x) => bytes(x.nBits as number))
+  .field("xMin", (x) => sbytes(x.nBits as number))
+  .field("xMax", (x) => sbytes(x.nBits as number))
+  .field("yMin", (x) => sbytes(x.nBits as number))
+  .field("yMax", (x) => sbytes(x.nBits as number))
   .build();
 
 export type HeaderStruct = {

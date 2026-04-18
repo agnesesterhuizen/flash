@@ -73,11 +73,12 @@ Deno.test("Bitstream.readSync delegates to read", () => {
 });
 
 Deno.test(
-  "Bitstream.readSigned currently reinterprets the value through a Uint32Array",
+  "Bitstream.readSigned performs twos complement sign extension",
   () => {
+    // 0xFF = 11111111, reading 8 bits signed → -1
     const bs = Bitstream.fromBuffer(new Uint8Array([0xff]));
 
-    assertEquals(4278190080, bs.readSigned(8));
+    assertEquals(-1, bs.readSigned(8));
     assertEquals(0, bs.available);
   },
 );
