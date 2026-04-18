@@ -354,6 +354,23 @@ type Tag =
       bitmapHeight: number;
       bitmapColorTableSize?: number;
       zlibBitmapData: Uint8Array;
+    }
+  | {
+      type: "PlaceObject2";
+      hasClipActions: boolean;
+      hasClipDepth: boolean;
+      hasName: boolean;
+      hasRatio: boolean;
+      hasColorTransform: boolean;
+      hasMatrix: boolean;
+      hasCharacter: boolean;
+      move: boolean;
+      depth: number;
+      characterId?: number;
+      matrix?: Matrix;
+      ratio?: number;
+      name?: string;
+      clipDepth?: number;
     };
 
 const RECT_SIZE = 9;
@@ -422,15 +439,37 @@ const matrixDeserialiser = new DeserialiserFactory<MatrixStruct>()
 
 const parseMatrixRecord = (bitstream: Bitstream): Matrix => {
   const s = matrixDeserialiser.deserialise(bitstream);
+  const withDefault = (value: number | undefined, fallback: number) =>
+    value === undefined || Number.isNaN(value) ? fallback : value;
+
+  const padding = (8 - (bitstream.index % 8)) % 8;
+  if (padding > 0) {
+    bitstream.readSync(padding);
+  }
 
   return {
-    scaleX: (s.scaleX as number | undefined) ?? 1,
-    scaleY: (s.scaleY as number | undefined) ?? 1,
-    rotateSkew0: (s.rotateSkew0 as number | undefined) ?? 0,
-    rotateSkew1: (s.rotateSkew1 as number | undefined) ?? 0,
-    translateX: (s.translateX as number | undefined) ?? 0,
-    translateY: (s.translateY as number | undefined) ?? 0,
+    scaleX: withDefault(s.scaleX as number | undefined, 1),
+    scaleY: withDefault(s.scaleY as number | undefined, 1),
+    rotateSkew0: withDefault(s.rotateSkew0 as number | undefined, 0),
+    rotateSkew1: withDefault(s.rotateSkew1 as number | undefined, 0),
+    translateX: withDefault(s.translateX as number | undefined, 0),
+    translateY: withDefault(s.translateY as number | undefined, 0),
   };
+};
+
+const parseNullTerminatedString = (bitstream: Bitstream): string => {
+  const chars: number[] = [];
+
+  while (true) {
+    const value = bitstream.readU8();
+    if (value === 0) {
+      break;
+    }
+
+    chars.push(value);
+  }
+
+  return String.fromCharCode(...chars);
 };
 
 type GradientRecordStuct = {
@@ -1160,6 +1199,54 @@ tagParsers[TagCode.DefineBitsLossless2] = (buffer) => {
     bitmapHeight,
     bitmapColorTableSize,
     zlibBitmapData,
+  } satisfies Tag;
+};
+
+tagParsers[TagCode.PlaceObject2] = (buffer) => {
+  const reader = Bitstream.fromBuffer(buffer);
+  const flags = reader.readU8();
+
+  const hasClipActions = (flags & 0x80) !== 0;
+  const hasClipDepth = (flags & 0x40) !== 0;
+  const hasName = (flags & 0x20) !== 0;
+  const hasRatio = (flags & 0x10) !== 0;
+  const hasColorTransform = (flags & 0x08) !== 0;
+  const hasMatrix = (flags & 0x04) !== 0;
+  const hasCharacter = (flags & 0x02) !== 0;
+  const move = (flags & 0x01) !== 0;
+
+  const depth = reader.readU16();
+  const characterId = hasCharacter ? reader.readU16() : undefined;
+  const matrix = hasMatrix ? parseMatrixRecord(reader) : undefined;
+
+  if (hasColorTransform) {
+    throw "PlaceObject2: unsupported color transform";
+  }
+
+  const ratio = hasRatio ? reader.readU16() : undefined;
+  const name = hasName ? parseNullTerminatedString(reader) : undefined;
+  const clipDepth = hasClipDepth ? reader.readU16() : undefined;
+
+  if (hasClipActions) {
+    throw "PlaceObject2: unsupported clip actions";
+  }
+
+  return {
+    type: "PlaceObject2",
+    hasClipActions,
+    hasClipDepth,
+    hasName,
+    hasRatio,
+    hasColorTransform,
+    hasMatrix,
+    hasCharacter,
+    move,
+    depth,
+    characterId,
+    matrix,
+    ratio,
+    name,
+    clipDepth,
   } satisfies Tag;
 };
 

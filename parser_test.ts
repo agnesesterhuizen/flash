@@ -247,6 +247,70 @@ Deno.test("parseTags - DefineBitsLossless2 argb image", () => {
   );
 });
 
+Deno.test("parseTags - PlaceObject2 minimal", () => {
+  const tags = parseTags(makeShortTag(26, [0x00, 0x34, 0x12]));
+
+  assertEquals(1, tags.length);
+  assertEquals(
+    {
+      type: "PlaceObject2",
+      hasClipActions: false,
+      hasClipDepth: false,
+      hasName: false,
+      hasRatio: false,
+      hasColorTransform: false,
+      hasMatrix: false,
+      hasCharacter: false,
+      move: false,
+      depth: 0x1234,
+      characterId: undefined,
+      matrix: undefined,
+      ratio: undefined,
+      name: undefined,
+      clipDepth: undefined,
+    },
+    tags[0],
+  );
+});
+
+Deno.test("parseTags - PlaceObject2 with optional fields", () => {
+  const tags = parseTags(
+    makeShortTag(
+      26,
+      [0x36, 0x02, 0x00, 0x34, 0x12, 0x00, 0x07, 0x00, 0x61, 0x00, 0x09, 0x00],
+    ),
+  );
+
+  assertEquals(1, tags.length);
+  assertEquals(
+    {
+      type: "PlaceObject2",
+      hasClipActions: false,
+      hasClipDepth: false,
+      hasName: true,
+      hasRatio: true,
+      hasColorTransform: false,
+      hasMatrix: true,
+      hasCharacter: true,
+      move: false,
+      depth: 2,
+      characterId: 0x1234,
+      matrix: {
+        scaleX: 1,
+        scaleY: 1,
+        rotateSkew0: 0,
+        rotateSkew1: 0,
+        translateX: 0,
+        translateY: 0,
+      },
+      ratio: 7,
+      name: "a",
+      clipDepth: undefined,
+    },
+    tags[0],
+  );
+});
+
 Deno.test("parseTags - unknown tag throws", () => {
   let thrown;
 
