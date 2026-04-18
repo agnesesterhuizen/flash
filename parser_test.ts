@@ -521,6 +521,7 @@ Deno.test("parseTags - PlaceObject2 minimal", () => {
       depth: 0x1234,
       characterId: undefined,
       matrix: undefined,
+      colorTransform: undefined,
       ratio: undefined,
       name: undefined,
       clipDepth: undefined,
@@ -559,6 +560,7 @@ Deno.test("parseTags - PlaceObject2 with optional fields", () => {
         translateX: 0,
         translateY: 0,
       },
+      colorTransform: undefined,
       ratio: 7,
       name: "a",
       clipDepth: undefined,
@@ -1613,6 +1615,7 @@ Deno.test("parseTags - PlaceObject2 with scale + translate matrix", () => {
         translateX: 100,
         translateY: -50,
       },
+      colorTransform: undefined,
       ratio: undefined,
       name: undefined,
       clipDepth: undefined,
@@ -1708,6 +1711,7 @@ Deno.test(
           translateX: 100,
           translateY: -50,
         },
+        colorTransform: undefined,
         ratio: undefined,
         name: "Bob",
         clipDepth: undefined,
@@ -1876,4 +1880,898 @@ Deno.test("MATRIX - byte alignment consumes padding bits", () => {
 
   // After parsing, bitstream should be byte-aligned at bit 16
   assertEquals(16, bs.index);
+});
+
+// --- DefineFontName (Tag 88) ---
+
+Deno.test("DefineFontName - parses font name and copyright", () => {
+  // Tag 88: FontID (UI16) + FontName (STRING) + FontCopyright (STRING)
+  // FontID = 1 → LE [0x01, 0x00]
+  // FontName = "Arial\0"
+  // FontCopyright = "Test\0"
+  const body = [
+    0x01,
+    0x00, // FontID = 1
+    0x41,
+    0x72,
+    0x69,
+    0x61,
+    0x6c,
+    0x00, // "Arial\0"
+    0x54,
+    0x65,
+    0x73,
+    0x74,
+    0x00, // "Test\0"
+  ];
+  const endTag = makeShortTag(0, []);
+  const buffer = new Uint8Array([...makeShortTag(88, body), ...endTag]);
+  const tags = parseTags(buffer);
+
+  assertEquals(tags[0], {
+    type: "DefineFontName",
+    fontId: 1,
+    fontName: "Arial",
+    fontCopyright: "Test",
+  });
+});
+
+Deno.test("DefineFontName - empty strings", () => {
+  const body = [
+    0x05,
+    0x00, // FontID = 5
+    0x00, // FontName = "" (just null terminator)
+    0x00, // FontCopyright = ""
+  ];
+  const endTag = makeShortTag(0, []);
+  const buffer = new Uint8Array([...makeShortTag(88, body), ...endTag]);
+  const tags = parseTags(buffer);
+
+  assertEquals(tags[0], {
+    type: "DefineFontName",
+    fontId: 5,
+    fontName: "",
+    fontCopyright: "",
+  });
+});
+
+// --- DefineSceneAndFrameLabelData (Tag 86) ---
+
+Deno.test(
+  "DefineSceneAndFrameLabelData - single scene, no frame labels",
+  () => {
+    // EncodedU32: values < 128 fit in one byte (MSB=0)
+    // SceneCount = 1
+    // Scene 0: offset = 0, name = "Scene 1\0"
+    // FrameLabelCount = 0
+    const body = [
+      0x01, // SceneCount = 1
+      0x00, // Offset[0] = 0
+      0x53,
+      0x63,
+      0x65,
+      0x6e,
+      0x65,
+      0x20,
+      0x31,
+      0x00, // "Scene 1\0"
+      0x00, // FrameLabelCount = 0
+    ];
+    const endTag = makeShortTag(0, []);
+    const buffer = new Uint8Array([...makeLongTag(86, body), ...endTag]);
+    const tags = parseTags(buffer);
+
+    assertEquals(tags[0], {
+      type: "DefineSceneAndFrameLabelData",
+      sceneCount: 1,
+      scenes: [{ offset: 0, name: "Scene 1" }],
+      frames: [],
+    });
+  },
+);
+
+Deno.test(
+  "DefineSceneAndFrameLabelData - multiple scenes and frame labels",
+  () => {
+    const body = [
+      0x02, // SceneCount = 2
+      0x00, // Offset[0] = 0
+      0x41,
+      0x00, // Name[0] = "A\0"
+      0x0a, // Offset[1] = 10
+      0x42,
+      0x00, // Name[1] = "B\0"
+      0x02, // FrameLabelCount = 2
+      0x00, // FrameNum[0] = 0
+      0x73,
+      0x74,
+      0x61,
+      0x72,
+      0x74,
+      0x00, // "start\0"
+      0x05, // FrameNum[1] = 5
+      0x65,
+      0x6e,
+      0x64,
+      0x00, // "end\0"
+    ];
+    const endTag = makeShortTag(0, []);
+    const buffer = new Uint8Array([...makeLongTag(86, body), ...endTag]);
+    const tags = parseTags(buffer);
+
+    assertEquals(tags[0], {
+      type: "DefineSceneAndFrameLabelData",
+      sceneCount: 2,
+      scenes: [
+        { offset: 0, name: "A" },
+        { offset: 10, name: "B" },
+      ],
+      frames: [
+        { number: 0, label: "start" },
+        { number: 5, label: "end" },
+      ],
+    });
+  },
+);
+
+Deno.test("DefineSceneAndFrameLabelData - EncodedU32 multi-byte value", () => {
+  // EncodedU32: 300 = 0b100101100
+  // Byte 0: 0b10101100 = 0xAC (low 7 bits = 0b0101100, MSB=1 → continue)
+  // Byte 1: 0b00000010 = 0x02 (next 7 bits = 0b0000010, MSB=0 → stop)
+  // Result: (0x2C) | (0x02 << 7) = 44 + 256 = 300
+  const body = [
+    0x01, // SceneCount = 1
+    0xac,
+    0x02, // Offset[0] = 300 (EncodedU32, 2 bytes)
+    0x58,
+    0x00, // Name[0] = "X\0"
+    0x00, // FrameLabelCount = 0
+  ];
+  const endTag = makeShortTag(0, []);
+  const buffer = new Uint8Array([...makeLongTag(86, body), ...endTag]);
+  const tags = parseTags(buffer);
+
+  assertEquals(tags[0], {
+    type: "DefineSceneAndFrameLabelData",
+    sceneCount: 1,
+    scenes: [{ offset: 300, name: "X" }],
+    frames: [],
+  });
+});
+
+// --- DefineEditText (Tag 37) ---
+
+// Helper to build a RECT with nBits=5 and all zeros (xMin=0, xMax=0, yMin=0, yMax=0)
+// nBits=5:  00101
+// 4 fields: 00000 00000 00000 00000
+// Total: 25 bits → pad to 32 bits (4 bytes)
+// 00101_00000_00000_00000_00000_0000000
+// Byte 0: 00101000 = 0x28
+// Byte 1: 00000000 = 0x00
+// Byte 2: 00000000 = 0x00
+// Byte 3: 00000000 = 0x00
+const zeroRect = [0x28, 0x00, 0x00, 0x00];
+
+Deno.test("DefineEditText - minimal (no optional fields)", () => {
+  // CharacterID = 1, zero RECT, all flags off except bare minimum
+  // Flags (16 bits, all 0): 0x00, 0x00
+  // VariableName = "" (null terminator)
+  const body = [
+    0x01,
+    0x00, // CharacterID = 1
+    ...zeroRect, // Bounds
+    0x00,
+    0x00, // 16 flag bits all zero
+    0x00, // VariableName = ""
+  ];
+  const endTag = makeShortTag(0, []);
+  const buffer = new Uint8Array([...makeLongTag(37, body), ...endTag]);
+  const tags = parseTags(buffer);
+
+  assertEquals(tags[0], {
+    type: "DefineEditText",
+    characterId: 1,
+    bounds: { nBits: 5, xMin: 0, xMax: 0, yMin: 0, yMax: 0 },
+    hasText: false,
+    wordWrap: false,
+    multiline: false,
+    password: false,
+    readOnly: false,
+    hasTextColor: false,
+    hasMaxLength: false,
+    hasFont: false,
+    hasFontClass: false,
+    autoSize: false,
+    hasLayout: false,
+    noSelect: false,
+    border: false,
+    wasStatic: false,
+    html: false,
+    useOutlines: false,
+    fontId: undefined,
+    fontClass: undefined,
+    fontHeight: undefined,
+    textColor: undefined,
+    maxLength: undefined,
+    align: undefined,
+    leftMargin: undefined,
+    rightMargin: undefined,
+    indent: undefined,
+    leading: undefined,
+    variableName: "",
+    initialText: undefined,
+  });
+});
+
+Deno.test("DefineEditText - with font and text", () => {
+  // Flags: HasText=1, HasFont=1, rest=0
+  // HasText is bit 0 (MSB of first flag byte), HasFont is bit 7 (LSB of first flag byte)
+  // Flag bits in order: HasText WordWrap Multiline Password ReadOnly HasTextColor HasMaxLength HasFont
+  //                     HasFontClass AutoSize HasLayout NoSelect Border WasStatic HTML UseOutlines
+  // HasText=1:  1000_0001 = 0x81
+  // Rest=0:     0000_0000 = 0x00
+  const body = [
+    0x02,
+    0x00, // CharacterID = 2
+    ...zeroRect, // Bounds
+    0x81, // HasText=1 HasFont=1 (bits: 1,0,0,0,0,0,0,1)
+    0x00, // second flag byte all zero
+    0x03,
+    0x00, // FontID = 3
+    0x00,
+    0xf0, // FontHeight = 0xf000 LE → actually 240 in twips... wait
+  ];
+
+  // Hmm, let me be more careful. FontHeight UI16 LE = 240 → 0xF0, 0x00
+  const body2 = [
+    0x02,
+    0x00, // CharacterID = 2
+    ...zeroRect, // Bounds
+    0x81,
+    0x00, // flags: HasText=1, HasFont=1
+    0x03,
+    0x00, // FontID = 3
+    0xf0,
+    0x00, // FontHeight = 240
+    0x6d,
+    0x79,
+    0x56,
+    0x61,
+    0x72,
+    0x00, // VariableName = "myVar\0"
+    0x48,
+    0x69,
+    0x00, // InitialText = "Hi\0"
+  ];
+  const endTag = makeShortTag(0, []);
+  const buffer = new Uint8Array([...makeLongTag(37, body2), ...endTag]);
+  const tags = parseTags(buffer);
+
+  assertEquals(tags[0], {
+    type: "DefineEditText",
+    characterId: 2,
+    bounds: { nBits: 5, xMin: 0, xMax: 0, yMin: 0, yMax: 0 },
+    hasText: true,
+    wordWrap: false,
+    multiline: false,
+    password: false,
+    readOnly: false,
+    hasTextColor: false,
+    hasMaxLength: false,
+    hasFont: true,
+    hasFontClass: false,
+    autoSize: false,
+    hasLayout: false,
+    noSelect: false,
+    border: false,
+    wasStatic: false,
+    html: false,
+    useOutlines: false,
+    fontId: 3,
+    fontClass: undefined,
+    fontHeight: 240,
+    textColor: undefined,
+    maxLength: undefined,
+    align: undefined,
+    leftMargin: undefined,
+    rightMargin: undefined,
+    indent: undefined,
+    leading: undefined,
+    variableName: "myVar",
+    initialText: "Hi",
+  });
+});
+
+Deno.test("DefineEditText - with layout, color, and maxLength", () => {
+  // Flags byte 1: HasText=0, WordWrap=1, Multiline=1, Password=0, ReadOnly=0,
+  //               HasTextColor=1, HasMaxLength=1, HasFont=0
+  //   = 0,1,1,0,0,1,1,0 = 0x66
+  // Flags byte 2: HasFontClass=0, AutoSize=0, HasLayout=1, NoSelect=0,
+  //               Border=1, WasStatic=0, HTML=0, UseOutlines=0
+  //   = 0,0,1,0,1,0,0,0 = 0x28
+  const body = [
+    0x0a,
+    0x00, // CharacterID = 10
+    ...zeroRect, // Bounds
+    0x66,
+    0x28, // flags
+    // TextColor RGBA (since HasTextColor=1): red=0xFF, green=0x00, blue=0x80, alpha=0xFF
+    0xff,
+    0x00,
+    0x80,
+    0xff,
+    // MaxLength UI16 (since HasMaxLength=1): 100
+    0x64,
+    0x00,
+    // Layout fields (since HasLayout=1):
+    0x02, // Align = 2 (Center)
+    0x14,
+    0x00, // LeftMargin = 20
+    0x0a,
+    0x00, // RightMargin = 10
+    0x05,
+    0x00, // Indent = 5
+    0xfe,
+    0xff, // Leading = -2 (SI16: 0xFFFE = -2)
+    // VariableName
+    0x74,
+    0x78,
+    0x74,
+    0x00, // "txt\0"
+  ];
+  const endTag = makeShortTag(0, []);
+  const buffer = new Uint8Array([...makeLongTag(37, body), ...endTag]);
+  const tags = parseTags(buffer);
+
+  assertEquals(tags[0], {
+    type: "DefineEditText",
+    characterId: 10,
+    bounds: { nBits: 5, xMin: 0, xMax: 0, yMin: 0, yMax: 0 },
+    hasText: false,
+    wordWrap: true,
+    multiline: true,
+    password: false,
+    readOnly: false,
+    hasTextColor: true,
+    hasMaxLength: true,
+    hasFont: false,
+    hasFontClass: false,
+    autoSize: false,
+    hasLayout: true,
+    noSelect: false,
+    border: true,
+    wasStatic: false,
+    html: false,
+    useOutlines: false,
+    fontId: undefined,
+    fontClass: undefined,
+    fontHeight: undefined,
+    textColor: { red: 0xff, green: 0x00, blue: 0x80, alpha: 0xff },
+    maxLength: 100,
+    align: 2,
+    leftMargin: 20,
+    rightMargin: 10,
+    indent: 5,
+    leading: -2,
+    variableName: "txt",
+    initialText: undefined,
+  });
+});
+
+// --- DefineText (Tag 11) / DefineText2 (Tag 33) ---
+
+// Build a MATRIX with no scale, no rotate, no translate (all zero).
+// HasScale=0 (1 bit), HasRotate=0 (1 bit), NTranslateBits=0 (5 bits: 00000),
+// Total: 7 bits → pad to 8 bits
+// Byte: 0,0,00000,0 = 0x00
+const zeroMatrix = [0x00];
+
+Deno.test("DefineText - single record, one glyph", () => {
+  // CharacterID = 1 (UI16 LE)
+  // TextBounds = zero RECT (nBits=5, all zeros, 4 bytes)
+  // TextMatrix = zero matrix (1 byte)
+  // GlyphBits = 2, AdvanceBits = 3
+  // TextRecord:
+  //   flags byte: TextRecordType=1, Reserved=000, HasFont=1, HasColor=0, HasYOffset=0, HasXOffset=0
+  //   = 1000_1000 = 0x88
+  //   FontID = 5 (UI16 LE: 0x05, 0x00)
+  //   TextHeight = 240 (UI16 LE: 0xF0, 0x00)
+  //   GlyphCount = 1
+  //   GlyphEntry: GlyphIndex=2 (UB[2]=10), GlyphAdvance=3 (SB[3]=011)
+  //     Bits: 10_011 = 5 bits → pad to 8: 10011_000 = 0x98
+  // EndOfRecords = 0x00
+  const body = [
+    0x01,
+    0x00, // CharacterID = 1
+    ...zeroRect, // TextBounds
+    ...zeroMatrix, // TextMatrix
+    0x02, // GlyphBits = 2
+    0x03, // AdvanceBits = 3
+    0x88, // TextRecord flags: type=1, hasFont=1
+    0x05,
+    0x00, // FontID = 5
+    0xf0,
+    0x00, // TextHeight = 240
+    0x01, // GlyphCount = 1
+    0x98, // GlyphIndex=2 (10), GlyphAdvance=3 (011), pad 000
+    0x00, // EndOfRecords
+  ];
+  const endTag = makeShortTag(0, []);
+  const buffer = new Uint8Array([...makeLongTag(11, body), ...endTag]);
+  const tags = parseTags(buffer);
+
+  const tag = tags[0];
+  assertEquals(tag.type, "DefineText");
+  if (tag.type !== "DefineText") return;
+  assertEquals(tag.characterId, 1);
+  assertEquals(tag.glyphBits, 2);
+  assertEquals(tag.advanceBits, 3);
+  assertEquals(tag.textRecords.length, 1);
+  assertEquals(tag.textRecords[0].fontId, 5);
+  assertEquals(tag.textRecords[0].textHeight, 240);
+  assertEquals(tag.textRecords[0].glyphEntries, [
+    { glyphIndex: 2, glyphAdvance: 3 },
+  ]);
+});
+
+Deno.test("DefineText - record with color and offsets", () => {
+  // GlyphBits = 1, AdvanceBits = 1
+  // TextRecord flags: type=1, reserved=000, hasFont=0, hasColor=1, hasYOffset=1, hasXOffset=1
+  //   = 1000_0111 = 0x87
+  // TextColor RGB: 0xFF, 0x00, 0x80
+  // XOffset SI16 LE: 100 → 0x64, 0x00
+  // YOffset SI16 LE: -10 → 0xF6, 0xFF
+  // GlyphCount = 1
+  // GlyphEntry: GlyphIndex=0 (UB[1]=0), GlyphAdvance=0 (SB[1]=0)
+  //   Bits: 0_0 = 2 bits → pad to 8: 00_000000 = 0x00
+  const body = [
+    0x02,
+    0x00, // CharacterID = 2
+    ...zeroRect,
+    ...zeroMatrix,
+    0x01, // GlyphBits = 1
+    0x01, // AdvanceBits = 1
+    0x87, // flags: hasColor=1, hasYOffset=1, hasXOffset=1
+    0xff,
+    0x00,
+    0x80, // TextColor RGB
+    0x64,
+    0x00, // XOffset = 100
+    0xf6,
+    0xff, // YOffset = -10
+    0x01, // GlyphCount = 1
+    0x00, // GlyphIndex=0, GlyphAdvance=0, padding
+    0x00, // EndOfRecords
+  ];
+  const endTag = makeShortTag(0, []);
+  const buffer = new Uint8Array([...makeLongTag(11, body), ...endTag]);
+  const tags = parseTags(buffer);
+
+  const tag = tags[0];
+  assertEquals(tag.type, "DefineText");
+  if (tag.type !== "DefineText") return;
+  assertEquals(tag.characterId, 2);
+  assertEquals(tag.textRecords.length, 1);
+  assertEquals(tag.textRecords[0].textColor, {
+    red: 0xff,
+    green: 0x00,
+    blue: 0x80,
+  });
+  assertEquals(tag.textRecords[0].xOffset, 100);
+  assertEquals(tag.textRecords[0].yOffset, -10);
+});
+
+Deno.test("DefineText2 - uses RGBA color", () => {
+  // Same as DefineText but tag 33, color is RGBA
+  // GlyphBits = 1, AdvanceBits = 1
+  // TextRecord flags: type=1, reserved=000, hasFont=0, hasColor=1, hasYOffset=0, hasXOffset=0
+  //   = 1000_0100 = 0x84
+  // TextColor RGBA: 0xFF, 0x00, 0x80, 0xAA
+  // GlyphCount = 1
+  // GlyphEntry: GlyphIndex=1 (UB[1]=1), GlyphAdvance=-1 (SB[1]=1)
+  //   Bits: 1_1 = 2 bits → pad to 8: 11_000000 = 0xC0
+  const body = [
+    0x03,
+    0x00, // CharacterID = 3
+    ...zeroRect,
+    ...zeroMatrix,
+    0x01, // GlyphBits = 1
+    0x01, // AdvanceBits = 1
+    0x84, // flags: hasColor=1
+    0xff,
+    0x00,
+    0x80,
+    0xaa, // TextColor RGBA
+    0x01, // GlyphCount = 1
+    0xc0, // GlyphIndex=1, GlyphAdvance=-1, padding
+    0x00, // EndOfRecords
+  ];
+  const endTag = makeShortTag(0, []);
+  const buffer = new Uint8Array([...makeLongTag(33, body), ...endTag]);
+  const tags = parseTags(buffer);
+
+  const tag = tags[0];
+  assertEquals(tag.type, "DefineText2");
+  if (tag.type !== "DefineText2") return;
+  assertEquals(tag.characterId, 3);
+  assertEquals(tag.textRecords.length, 1);
+  assertEquals(tag.textRecords[0].textColor, {
+    red: 0xff,
+    green: 0x00,
+    blue: 0x80,
+    alpha: 0xaa,
+  });
+  assertEquals(tag.textRecords[0].glyphEntries, [
+    { glyphIndex: 1, glyphAdvance: -1 },
+  ]);
+});
+
+Deno.test("DefineText - no text records (just EndOfRecords)", () => {
+  const body = [
+    0x04,
+    0x00, // CharacterID = 4
+    ...zeroRect,
+    ...zeroMatrix,
+    0x01, // GlyphBits = 1
+    0x01, // AdvanceBits = 1
+    0x00, // EndOfRecords immediately
+  ];
+  const endTag = makeShortTag(0, []);
+  const buffer = new Uint8Array([...makeLongTag(11, body), ...endTag]);
+  const tags = parseTags(buffer);
+
+  const tag = tags[0];
+  assertEquals(tag.type, "DefineText");
+  if (tag.type !== "DefineText") return;
+  assertEquals(tag.textRecords.length, 0);
+});
+
+// Helper: encode a float16 value as two little-endian bytes
+const encodeFloat16 = (value: number): [number, number] => {
+  const buf = new ArrayBuffer(4);
+  const f32 = new Float32Array(buf);
+  const u32 = new Uint32Array(buf);
+  f32[0] = value;
+  const bits32 = u32[0];
+  const sign = (bits32 >> 31) & 1;
+  let exponent = ((bits32 >> 23) & 0xff) - 127 + 15;
+  let mantissa = (bits32 >> 13) & 0x3ff;
+  if (exponent <= 0) {
+    exponent = 0;
+    mantissa = 0;
+  } else if (exponent >= 31) {
+    exponent = 31;
+    mantissa = 0;
+  }
+  const bits16 = (sign << 15) | (exponent << 10) | mantissa;
+  return [bits16 & 0xff, (bits16 >> 8) & 0xff];
+};
+
+Deno.test("DefineFontAlignZones - single glyph zone", () => {
+  // FLOAT16 1.0 = 0x3C00 -> LE bytes: 0x00, 0x3C
+  // FLOAT16 0.5 = 0x3800 -> LE bytes: 0x00, 0x38
+  // FLOAT16 2.0 = 0x4000 -> LE bytes: 0x00, 0x40
+  // FLOAT16 0.0 = 0x0000 -> LE bytes: 0x00, 0x00
+  const body = [
+    0x05,
+    0x00, // FontID = 5
+    0x40, // CSMTableHint = 1 (medium), Reserved = 0 → bits: 01_000000
+    // ZONERECORD[0]:
+    0x02, // NumZoneData = 2
+    ...encodeFloat16(1.0), // ZoneData[0].AlignmentCoordinate = 1.0
+    ...encodeFloat16(0.5), // ZoneData[0].Range = 0.5
+    ...encodeFloat16(2.0), // ZoneData[1].AlignmentCoordinate = 2.0
+    ...encodeFloat16(0.0), // ZoneData[1].Range = 0.0
+    0x03, // Reserved(6)=0, ZoneMaskY=1, ZoneMaskX=1 → bits: 000000_1_1
+  ];
+  const endTag = makeShortTag(0, []);
+  const buffer = new Uint8Array([...makeShortTag(73, body), ...endTag]);
+  const tags = parseTags(buffer);
+
+  const tag = tags[0];
+  assertEquals(tag.type, "DefineFontAlignZones");
+  if (tag.type !== "DefineFontAlignZones") return;
+  assertEquals(tag.fontId, 5);
+  assertEquals(tag.csmTableHint, 1);
+  assertEquals(tag.zoneTable.length, 1);
+
+  const zone = tag.zoneTable[0];
+  assertEquals(zone.numZoneData, 2);
+  assertEquals(zone.zoneData.length, 2);
+  assertEquals(zone.zoneData[0].alignmentCoordinate, 1.0);
+  assertEquals(zone.zoneData[0].range, 0.5);
+  assertEquals(zone.zoneData[1].alignmentCoordinate, 2.0);
+  assertEquals(zone.zoneData[1].range, 0.0);
+  assertEquals(zone.zoneMaskY, true);
+  assertEquals(zone.zoneMaskX, true);
+});
+
+Deno.test("DefineFontAlignZones - multiple glyph zones", () => {
+  const body = [
+    0x0a,
+    0x00, // FontID = 10
+    0x80, // CSMTableHint = 2 (thick), Reserved = 0 → bits: 10_000000
+    // ZONERECORD[0]:
+    0x02, // NumZoneData = 2
+    ...encodeFloat16(0.25), // ZoneData[0].AlignmentCoordinate
+    ...encodeFloat16(0.125), // ZoneData[0].Range
+    ...encodeFloat16(0.75), // ZoneData[1].AlignmentCoordinate
+    ...encodeFloat16(1.5), // ZoneData[1].Range
+    0x02, // Reserved=0, ZoneMaskY=1, ZoneMaskX=0 → bits: 000000_1_0
+    // ZONERECORD[1]:
+    0x02, // NumZoneData = 2
+    ...encodeFloat16(3.0), // ZoneData[0].AlignmentCoordinate
+    ...encodeFloat16(0.0), // ZoneData[0].Range
+    ...encodeFloat16(4.0), // ZoneData[1].AlignmentCoordinate
+    ...encodeFloat16(0.0), // ZoneData[1].Range
+    0x01, // Reserved=0, ZoneMaskY=0, ZoneMaskX=1 → bits: 000000_0_1
+  ];
+  const endTag = makeShortTag(0, []);
+  const buffer = new Uint8Array([...makeLongTag(73, body), ...endTag]);
+  const tags = parseTags(buffer);
+
+  const tag = tags[0];
+  assertEquals(tag.type, "DefineFontAlignZones");
+  if (tag.type !== "DefineFontAlignZones") return;
+  assertEquals(tag.fontId, 10);
+  assertEquals(tag.csmTableHint, 2);
+  assertEquals(tag.zoneTable.length, 2);
+
+  assertEquals(tag.zoneTable[0].zoneMaskY, true);
+  assertEquals(tag.zoneTable[0].zoneMaskX, false);
+  assertEquals(tag.zoneTable[0].zoneData[0].alignmentCoordinate, 0.25);
+  assertEquals(tag.zoneTable[0].zoneData[0].range, 0.125);
+  assertEquals(tag.zoneTable[0].zoneData[1].alignmentCoordinate, 0.75);
+  assertEquals(tag.zoneTable[0].zoneData[1].range, 1.5);
+
+  assertEquals(tag.zoneTable[1].zoneMaskY, false);
+  assertEquals(tag.zoneTable[1].zoneMaskX, true);
+  assertEquals(tag.zoneTable[1].zoneData[0].alignmentCoordinate, 3.0);
+  assertEquals(tag.zoneTable[1].zoneData[1].alignmentCoordinate, 4.0);
+});
+
+Deno.test("DefineFont3 - 0 glyphs, no layout (device font)", () => {
+  const body = [
+    0x01,
+    0x00, // FontID = 1
+    // Flags byte: HasLayout=0, ShiftJIS=0, SmallText=0, ANSI=0,
+    //             WideOffsets=0, WideCodes=1, Italic=0, Bold=0
+    //             = 0b00000100 = 0x04
+    0x04,
+    0x01, // LanguageCode = 1 (Latin)
+    0x04, // FontNameLen = 4
+    0x54,
+    0x65,
+    0x73,
+    0x74, // FontName = "Test"
+    0x00,
+    0x00, // NumGlyphs = 0
+    // No OffsetTable, CodeTableOffset, GlyphShapeTable, CodeTable
+    // No layout data (HasLayout=0)
+  ];
+  const endTag = makeShortTag(0, []);
+  const buffer = new Uint8Array([...makeShortTag(75, body), ...endTag]);
+  const tags = parseTags(buffer);
+
+  const tag = tags[0];
+  assertEquals(tag.type, "DefineFont3");
+  if (tag.type !== "DefineFont3") return;
+  assertEquals(tag.fontId, 1);
+  assertEquals(tag.hasLayout, false);
+  assertEquals(tag.wideCodes, true);
+  assertEquals(tag.italic, false);
+  assertEquals(tag.bold, false);
+  assertEquals(tag.languageCode, 1);
+  assertEquals(tag.fontName, "Test");
+  assertEquals(tag.numGlyphs, 0);
+  assertEquals(tag.glyphShapeTable, []);
+  assertEquals(tag.codeTable, []);
+  assertEquals(tag.fontAscent, undefined);
+});
+
+Deno.test("DefineFont3 - single glyph, narrow offsets, no layout", () => {
+  // Build a minimal glyph shape: NumFillBits=1, NumLineBits=0,
+  // then EndShape record (non-edge, flags=0 → 6 zero bits)
+  // = 0b0001_0000 0b000000_xx = [0x10, 0x00] (byte-aligned, 2 bytes)
+  const glyphShape = [0x10, 0x00]; // NF=1, NL=0, then 1-bit non-edge + 5-bit flags=0 → EndShape, padded
+
+  // Offset table: single entry pointing past itself
+  // OffsetTable has 1 entry (UI16) + CodeTableOffset (UI16) = 4 bytes
+  // Glyph starts at byte 4 from start of OffsetTable
+  const offsetTable = [
+    0x04,
+    0x00, // Offset[0] = 4 (past OffsetTable + CodeTableOffset)
+  ];
+  const codeTableOffset = [
+    0x06,
+    0x00, // CodeTableOffset = 6 (4 + 2 bytes of glyph)
+  ];
+
+  const body = [
+    0x02,
+    0x00, // FontID = 2
+    // Flags: HasLayout=0, ShiftJIS=0, SmallText=0, ANSI=0,
+    //        WideOffsets=0, WideCodes=1, Italic=1, Bold=0
+    //        = 0b00000110 = 0x06
+    0x06,
+    0x01, // LanguageCode = 1
+    0x01, // FontNameLen = 1
+    0x41, // FontName = "A"
+    0x01,
+    0x00, // NumGlyphs = 1
+    ...offsetTable,
+    ...codeTableOffset,
+    ...glyphShape,
+    0x41,
+    0x00, // CodeTable[0] = 0x0041 ('A')
+  ];
+  const endTag = makeShortTag(0, []);
+  const buffer = new Uint8Array([...makeLongTag(75, body), ...endTag]);
+  const tags = parseTags(buffer);
+
+  const tag = tags[0];
+  assertEquals(tag.type, "DefineFont3");
+  if (tag.type !== "DefineFont3") return;
+  assertEquals(tag.fontId, 2);
+  assertEquals(tag.italic, true);
+  assertEquals(tag.bold, false);
+  assertEquals(tag.fontName, "A");
+  assertEquals(tag.numGlyphs, 1);
+  assertEquals(tag.glyphShapeTable.length, 1);
+  assertEquals(tag.glyphShapeTable[0].length, 1);
+  assertEquals(tag.glyphShapeTable[0][0].type, "EndShape");
+  assertEquals(tag.codeTable, [0x0041]);
+  assertEquals(tag.fontAscent, undefined);
+});
+
+Deno.test("DefineFont3 - with layout and kerning", () => {
+  // Same minimal glyph shapes (EndShape only)
+  const glyphShape = [0x10, 0x00];
+
+  // 2 glyphs, narrow offsets
+  // OffsetTable: 2×UI16 + CodeTableOffset UI16 = 6 bytes before glyphs
+  const body = [
+    0x03,
+    0x00, // FontID = 3
+    // Flags: HasLayout=1, ShiftJIS=0, SmallText=0, ANSI=0,
+    //        WideOffsets=0, WideCodes=1, Italic=0, Bold=1
+    //        = 0b10000101 = 0x85
+    0x85,
+    0x01, // LanguageCode = 1
+    0x02, // FontNameLen = 2
+    0x42,
+    0x43, // FontName = "BC"
+    0x02,
+    0x00, // NumGlyphs = 2
+    // OffsetTable (2 entries × UI16)
+    0x06,
+    0x00, // Offset[0] = 6 (past 2×UI16 offsets + 1×UI16 codeTableOffset)
+    0x08,
+    0x00, // Offset[1] = 8 (6 + 2 bytes glyph0)
+    // CodeTableOffset
+    0x0a,
+    0x00, // CodeTableOffset = 10 (8 + 2 bytes glyph1)
+    // GlyphShapeTable[0]
+    ...glyphShape,
+    // GlyphShapeTable[1]
+    ...glyphShape,
+    // CodeTable
+    0x42,
+    0x00, // CodeTable[0] = 0x0042 ('B')
+    0x43,
+    0x00, // CodeTable[1] = 0x0043 ('C')
+    // Layout data:
+    // FontAscent SI16
+    0xe8,
+    0x03, // 1000
+    // FontDescent SI16
+    0xf4,
+    0x01, // 500
+    // FontLeading SI16
+    0x00,
+    0x00, // 0
+    // FontAdvanceTable SI16[2]
+    0xc8,
+    0x00, // 200
+    0x90,
+    0x01, // 400
+    // FontBoundsTable RECT[2] — minimal zero RECTs
+    // RECT: nBits=0 (5 bits) → 0b00000 xxx = 0x00 (byte-aligned, 1 byte each)
+    0x00, // RECT[0]: nBits=0, no fields
+    0x00, // RECT[1]: nBits=0, no fields
+    // KerningCount UI16
+    0x01,
+    0x00, // 1 kerning record
+    // KERNINGRECORD (wideCodes=1): UI16 + UI16 + SI16
+    0x42,
+    0x00, // Code1 = 0x0042 ('B')
+    0x43,
+    0x00, // Code2 = 0x0043 ('C')
+    0xf6,
+    0xff, // Adjustment = -10 (0xFFF6 as SI16)
+  ];
+  const endTag = makeShortTag(0, []);
+  const buffer = new Uint8Array([...makeLongTag(75, body), ...endTag]);
+  const tags = parseTags(buffer);
+
+  const tag = tags[0];
+  assertEquals(tag.type, "DefineFont3");
+  if (tag.type !== "DefineFont3") return;
+  assertEquals(tag.fontId, 3);
+  assertEquals(tag.hasLayout, true);
+  assertEquals(tag.bold, true);
+  assertEquals(tag.italic, false);
+  assertEquals(tag.fontName, "BC");
+  assertEquals(tag.numGlyphs, 2);
+  assertEquals(tag.glyphShapeTable.length, 2);
+  assertEquals(tag.codeTable, [0x0042, 0x0043]);
+  assertEquals(tag.fontAscent, 1000);
+  assertEquals(tag.fontDescent, 500);
+  assertEquals(tag.fontLeading, 0);
+  assertEquals(tag.fontAdvanceTable, [200, 400]);
+  assertEquals(tag.fontBoundsTable!.length, 2);
+  assertEquals(tag.kerningTable!.length, 1);
+  assertEquals(tag.kerningTable![0], {
+    code1: 0x42,
+    code2: 0x43,
+    adjustment: -10,
+  });
+});
+
+Deno.test("DefineSprite - empty sprite (just End tag)", () => {
+  const spriteBody = [
+    0x05,
+    0x00, // SpriteID = 5
+    0x01,
+    0x00, // FrameCount = 1
+    // Nested tags: just End
+    ...makeShortTag(0, []),
+  ];
+  const endTag = makeShortTag(0, []);
+  const buffer = new Uint8Array([...makeLongTag(39, spriteBody), ...endTag]);
+  const tags = parseTags(buffer);
+
+  const tag = tags[0];
+  assertEquals(tag.type, "DefineSprite");
+  if (tag.type !== "DefineSprite") return;
+  assertEquals(tag.spriteId, 5);
+  assertEquals(tag.frameCount, 1);
+  assertEquals(tag.controlTags.length, 1);
+  assertEquals(tag.controlTags[0].type, "End");
+});
+
+Deno.test("DefineSprite - with ShowFrame and PlaceObject2", () => {
+  // PlaceObject2: move=1, hasCharacter=1, depth=1, characterId=7
+  const placeBody = [
+    0x03, // flags: hasCharacter=1, move=1
+    0x01,
+    0x00, // depth = 1
+    0x07,
+    0x00, // characterId = 7
+  ];
+  const spriteBody = [
+    0x0a,
+    0x00, // SpriteID = 10
+    0x02,
+    0x00, // FrameCount = 2
+    // Nested tags:
+    ...makeShortTag(26, placeBody), // PlaceObject2
+    ...makeShortTag(1, []), // ShowFrame
+    ...makeShortTag(1, []), // ShowFrame
+    ...makeShortTag(0, []), // End
+  ];
+  const endTag = makeShortTag(0, []);
+  const buffer = new Uint8Array([...makeLongTag(39, spriteBody), ...endTag]);
+  const tags = parseTags(buffer);
+
+  const tag = tags[0];
+  assertEquals(tag.type, "DefineSprite");
+  if (tag.type !== "DefineSprite") return;
+  assertEquals(tag.spriteId, 10);
+  assertEquals(tag.frameCount, 2);
+  assertEquals(tag.controlTags.length, 4);
+  assertEquals(tag.controlTags[0].type, "PlaceObject2");
+  assertEquals(tag.controlTags[1].type, "ShowFrame");
+  assertEquals(tag.controlTags[2].type, "ShowFrame");
+  assertEquals(tag.controlTags[3].type, "End");
 });

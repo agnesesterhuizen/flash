@@ -66,4 +66,25 @@ export class Bitstream {
     }
     return n;
   }
+
+  readFloat16(): number {
+    const bits = this.readU16();
+    const sign = (bits >> 15) & 1;
+    const exponent = (bits >> 10) & 0x1f;
+    const mantissa = bits & 0x3ff;
+
+    if (exponent === 0) {
+      // Denormalized or zero
+      const value = (mantissa / 1024) * Math.pow(2, -14);
+      return sign ? -value : value;
+    }
+
+    if (exponent === 0x1f) {
+      // Infinity or NaN
+      return mantissa === 0 ? (sign ? -Infinity : Infinity) : NaN;
+    }
+
+    const value = (1 + mantissa / 1024) * Math.pow(2, exponent - 15);
+    return sign ? -value : value;
+  }
 }

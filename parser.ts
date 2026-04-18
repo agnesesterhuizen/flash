@@ -309,6 +309,31 @@ interface ShapeWithStyle {
   shapeRecords: ShapeRecord[];
 }
 
+interface GlyphEntry {
+  glyphIndex: number;
+  glyphAdvance: number;
+}
+
+interface ColorTransform {
+  redMultTerm: number;
+  greenMultTerm: number;
+  blueMultTerm: number;
+  alphaMultTerm: number;
+  redAddTerm: number;
+  greenAddTerm: number;
+  blueAddTerm: number;
+  alphaAddTerm: number;
+}
+
+interface TextRecord<ColorType = RGB> {
+  fontId?: number;
+  textColor?: ColorType;
+  xOffset?: number;
+  yOffset?: number;
+  textHeight?: number;
+  glyphEntries: GlyphEntry[];
+}
+
 type Tag =
   | {
       type: "SetBackgroundColor";
@@ -387,9 +412,36 @@ type Tag =
       depth: number;
       characterId?: number;
       matrix?: Matrix;
+      colorTransform?: ColorTransform;
       ratio?: number;
       name?: string;
       clipDepth?: number;
+    }
+  | {
+      type: "PlaceObject3";
+      hasClipActions: boolean;
+      hasClipDepth: boolean;
+      hasName: boolean;
+      hasRatio: boolean;
+      hasColorTransform: boolean;
+      hasMatrix: boolean;
+      hasCharacter: boolean;
+      move: boolean;
+      hasImage: boolean;
+      hasClassName: boolean;
+      hasCacheAsBitmap: boolean;
+      hasBlendMode: boolean;
+      hasFilterList: boolean;
+      depth: number;
+      className?: string;
+      characterId?: number;
+      matrix?: Matrix;
+      colorTransform?: ColorTransform;
+      ratio?: number;
+      name?: string;
+      clipDepth?: number;
+      blendMode?: number;
+      bitmapCache?: number;
     }
   | {
       type: "DoABC";
@@ -402,7 +454,122 @@ type Tag =
       symbols: { tag: number; name: string }[];
     }
   | {
+      type: "DefineEditText";
+      characterId: number;
+      bounds: Rect;
+      hasText: boolean;
+      wordWrap: boolean;
+      multiline: boolean;
+      password: boolean;
+      readOnly: boolean;
+      hasTextColor: boolean;
+      hasMaxLength: boolean;
+      hasFont: boolean;
+      hasFontClass: boolean;
+      autoSize: boolean;
+      hasLayout: boolean;
+      noSelect: boolean;
+      border: boolean;
+      wasStatic: boolean;
+      html: boolean;
+      useOutlines: boolean;
+      fontId?: number;
+      fontClass?: string;
+      fontHeight?: number;
+      textColor?: RGBA;
+      maxLength?: number;
+      align?: number;
+      leftMargin?: number;
+      rightMargin?: number;
+      indent?: number;
+      leading?: number;
+      variableName: string;
+      initialText?: string;
+    }
+  | {
+      type: "DefineText";
+      characterId: number;
+      textBounds: Rect;
+      textMatrix: Matrix;
+      glyphBits: number;
+      advanceBits: number;
+      textRecords: TextRecord<RGB>[];
+    }
+  | {
+      type: "DefineText2";
+      characterId: number;
+      textBounds: Rect;
+      textMatrix: Matrix;
+      glyphBits: number;
+      advanceBits: number;
+      textRecords: TextRecord<RGBA>[];
+    }
+  | {
+      type: "DefineFontName";
+      fontId: number;
+      fontName: string;
+      fontCopyright: string;
+    }
+  | {
+      type: "DefineFontAlignZones";
+      fontId: number;
+      csmTableHint: number;
+      zoneTable: {
+        numZoneData: number;
+        zoneData: { alignmentCoordinate: number; range: number }[];
+        zoneMaskY: boolean;
+        zoneMaskX: boolean;
+      }[];
+    }
+  | {
+      type: "DefineFont3";
+      fontId: number;
+      hasLayout: boolean;
+      shiftJIS: boolean;
+      smallText: boolean;
+      ansi: boolean;
+      wideOffsets: boolean;
+      wideCodes: boolean;
+      italic: boolean;
+      bold: boolean;
+      languageCode: number;
+      fontName: string;
+      numGlyphs: number;
+      glyphShapeTable: ShapeRecord[][];
+      codeTable: number[];
+      fontAscent?: number;
+      fontDescent?: number;
+      fontLeading?: number;
+      fontAdvanceTable?: number[];
+      fontBoundsTable?: Rect[];
+      kerningTable?: { code1: number; code2: number; adjustment: number }[];
+    }
+  | {
+      type: "DefineSprite";
+      spriteId: number;
+      frameCount: number;
+      controlTags: Tag[];
+    }
+  | {
       type: "ShowFrame";
+    }
+  | {
+      type: "FrameLabel";
+      name: string;
+      namedAnchor: boolean;
+    }
+  | {
+      type: "RemoveObject";
+      characterId: number;
+      depth: number;
+    }
+  | {
+      type: "RemoveObject2";
+      depth: number;
+    }
+  | {
+      type: "DoAction";
+      actions: Uint8Array;
     }
   | {
       type: "Unimplemented";
@@ -417,6 +584,11 @@ const readU16LE = (buffer: Uint8Array, offset: number) =>
     offset,
     true,
   );
+
+const readS16 = (reader: Bitstream): number => {
+  const val = reader.readU16();
+  return val >= 0x8000 ? val - 0x10000 : val;
+};
 
 const parseRect = (bs: Bitstream): Rect => {
   const rect = rectDeserialiser.deserialise(bs);
@@ -1184,6 +1356,74 @@ tagParsers[TagCode.DefineBitsLossless2] = (buffer) =>
 tagParsers[TagCode.DefineBitsLossless] = (buffer) =>
   parseDefineBitsLossless("DefineBitsLossless", [4, 5], buffer);
 
+const parseCxFormWithAlpha = (reader: Bitstream): ColorTransform => {
+  const hasAddTerms = reader.readSync(1) === 1;
+  const hasMultTerms = reader.readSync(1) === 1;
+  const nBits = reader.readSync(4);
+  const redMultTerm = hasMultTerms ? reader.readSigned(nBits) : 256;
+  const greenMultTerm = hasMultTerms ? reader.readSigned(nBits) : 256;
+  const blueMultTerm = hasMultTerms ? reader.readSigned(nBits) : 256;
+  const alphaMultTerm = hasMultTerms ? reader.readSigned(nBits) : 256;
+  const redAddTerm = hasAddTerms ? reader.readSigned(nBits) : 0;
+  const greenAddTerm = hasAddTerms ? reader.readSigned(nBits) : 0;
+  const blueAddTerm = hasAddTerms ? reader.readSigned(nBits) : 0;
+  const alphaAddTerm = hasAddTerms ? reader.readSigned(nBits) : 0;
+  const padding = (8 - (reader.index % 8)) % 8;
+  if (padding > 0) reader.readSync(padding);
+  return {
+    redMultTerm,
+    greenMultTerm,
+    blueMultTerm,
+    alphaMultTerm,
+    redAddTerm,
+    greenAddTerm,
+    blueAddTerm,
+    alphaAddTerm,
+  };
+};
+
+const skipFilterList = (reader: Bitstream): void => {
+  const numberOfFilters = reader.readU8();
+  for (let i = 0; i < numberOfFilters; i++) {
+    const filterId = reader.readU8();
+    switch (filterId) {
+      case 0: // DropShadow: RGBA(4) + 4×FIXED(16) + FIXED8(2) + 1 byte bits = 23
+        reader.readSync(23 * 8);
+        break;
+      case 1: // Blur: 2×FIXED(8) + 1 byte bits = 9
+        reader.readSync(9 * 8);
+        break;
+      case 2: // Glow: RGBA(4) + 2×FIXED(8) + FIXED8(2) + 1 byte bits = 15
+        reader.readSync(15 * 8);
+        break;
+      case 3: // Bevel: 2×RGBA(8) + 3×FIXED(12) + FIXED8(2) + 1 byte bits = 23
+        reader.readSync(23 * 8);
+        break;
+      case 4: // GradientGlow
+      case 7: {
+        // GradientBevel
+        const numColors = reader.readU8();
+        // RGBA[numColors] + UI8[numColors] + 4×FIXED(16) + FIXED8(2) + 1 byte bits
+        reader.readSync((numColors * 5 + 19) * 8);
+        break;
+      }
+      case 5: {
+        // Convolution
+        const matrixX = reader.readU8();
+        const matrixY = reader.readU8();
+        // Divisor(4) + Bias(4) + FLOAT[matrixX*matrixY](4 each) + RGBA(4) + 1 byte bits
+        reader.readSync((12 + matrixX * matrixY * 4 + 1) * 8);
+        break;
+      }
+      case 6: // ColorMatrix: FLOAT[20] = 80 bytes
+        reader.readSync(80 * 8);
+        break;
+      default:
+        throw `skipFilterList: unknown filter ID ${filterId}`;
+    }
+  }
+};
+
 tagParsers[TagCode.PlaceObject2] = (buffer) => {
   const reader = Bitstream.fromBuffer(buffer);
   const flags = reader.readU8();
@@ -1201,8 +1441,9 @@ tagParsers[TagCode.PlaceObject2] = (buffer) => {
   const characterId = hasCharacter ? reader.readU16() : undefined;
   const matrix = hasMatrix ? parseMatrixRecord(reader) : undefined;
 
+  let colorTransform: ColorTransform | undefined;
   if (hasColorTransform) {
-    throw "PlaceObject2: unsupported color transform";
+    colorTransform = parseCxFormWithAlpha(reader);
   }
 
   const ratio = hasRatio ? reader.readU16() : undefined;
@@ -1226,9 +1467,75 @@ tagParsers[TagCode.PlaceObject2] = (buffer) => {
     depth,
     characterId,
     matrix,
+    colorTransform,
     ratio,
     name,
     clipDepth,
+  } satisfies Tag;
+};
+
+tagParsers[TagCode.PlaceObject3] = (buffer) => {
+  const reader = Bitstream.fromBuffer(buffer);
+  const flags1 = reader.readU8();
+  const flags2 = reader.readU8();
+
+  const hasClipActions = (flags1 & 0x80) !== 0;
+  const hasClipDepth = (flags1 & 0x40) !== 0;
+  const hasName = (flags1 & 0x20) !== 0;
+  const hasRatio = (flags1 & 0x10) !== 0;
+  const hasColorTransform = (flags1 & 0x08) !== 0;
+  const hasMatrix = (flags1 & 0x04) !== 0;
+  const hasCharacter = (flags1 & 0x02) !== 0;
+  const move = (flags1 & 0x01) !== 0;
+
+  const hasImage = (flags2 & 0x10) !== 0;
+  const hasClassName = (flags2 & 0x08) !== 0;
+  const hasCacheAsBitmap = (flags2 & 0x04) !== 0;
+  const hasBlendMode = (flags2 & 0x02) !== 0;
+  const hasFilterList = (flags2 & 0x01) !== 0;
+
+  const depth = reader.readU16();
+  const className =
+    hasClassName || (hasImage && hasCharacter)
+      ? parseNullTerminatedString(reader)
+      : undefined;
+  const characterId = hasCharacter ? reader.readU16() : undefined;
+  const matrix = hasMatrix ? parseMatrixRecord(reader) : undefined;
+  const colorTransform = hasColorTransform
+    ? parseCxFormWithAlpha(reader)
+    : undefined;
+  const ratio = hasRatio ? reader.readU16() : undefined;
+  const name = hasName ? parseNullTerminatedString(reader) : undefined;
+  const clipDepth = hasClipDepth ? reader.readU16() : undefined;
+  if (hasFilterList) skipFilterList(reader);
+  const blendMode = hasBlendMode ? reader.readU8() : undefined;
+  const bitmapCache = hasCacheAsBitmap ? reader.readU8() : undefined;
+
+  return {
+    type: "PlaceObject3",
+    hasClipActions,
+    hasClipDepth,
+    hasName,
+    hasRatio,
+    hasColorTransform,
+    hasMatrix,
+    hasCharacter,
+    move,
+    hasImage,
+    hasClassName,
+    hasCacheAsBitmap,
+    hasBlendMode,
+    hasFilterList,
+    depth,
+    className,
+    characterId,
+    matrix,
+    colorTransform,
+    ratio,
+    name,
+    clipDepth,
+    blendMode,
+    bitmapCache,
   } satisfies Tag;
 };
 
@@ -1275,15 +1582,457 @@ const TODO_PARSER =
     return { type: "Unimplemented", tagType: name };
   };
 
-tagParsers[TagCode.DefineSceneAndFrameLabelData] = TODO_PARSER(
-  "DefineSceneAndFrameLabelData",
-);
-tagParsers[TagCode.DefineFont3] = TODO_PARSER("DefineFont3");
-tagParsers[TagCode.DefineFontAlignZones] = TODO_PARSER("DefineFontAlignZones");
-tagParsers[TagCode.DefineEditText] = TODO_PARSER("DefineEditText");
-tagParsers[TagCode.DefineFontName] = TODO_PARSER("DefineFontName");
-tagParsers[TagCode.DefineText] = TODO_PARSER("DefineText");
-tagParsers[TagCode.DefineSprite] = TODO_PARSER("DefineSprite");
+const parseEncodedU32 = (bitstream: Bitstream): number => {
+  let result = 0;
+  for (let i = 0; i < 5; i++) {
+    const byte = bitstream.readU8();
+    result |= (byte & 0x7f) << (7 * i);
+    if ((byte & 0x80) === 0) break;
+  }
+  return result;
+};
+
+tagParsers[TagCode.DefineSceneAndFrameLabelData] = (buffer) => {
+  const reader = Bitstream.fromBuffer(buffer);
+
+  const sceneCount = parseEncodedU32(reader);
+  const scenes: Scene[] = [];
+  for (let i = 0; i < sceneCount; i++) {
+    const offset = parseEncodedU32(reader);
+    const name = parseNullTerminatedString(reader);
+    scenes.push({ offset, name });
+  }
+
+  const frameLabelCount = parseEncodedU32(reader);
+  const frames: Frame[] = [];
+  for (let i = 0; i < frameLabelCount; i++) {
+    const number = parseEncodedU32(reader);
+    const label = parseNullTerminatedString(reader);
+    frames.push({ number, label });
+  }
+
+  return {
+    type: "DefineSceneAndFrameLabelData",
+    sceneCount,
+    scenes,
+    frames,
+  } satisfies Tag;
+};
+tagParsers[TagCode.DefineFont3] = (buffer) => {
+  const reader = Bitstream.fromBuffer(buffer);
+
+  const fontId = reader.readU16();
+  const hasLayout = reader.readSync(1) === 1;
+  const shiftJIS = reader.readSync(1) === 1;
+  const smallText = reader.readSync(1) === 1;
+  const ansi = reader.readSync(1) === 1;
+  const wideOffsets = reader.readSync(1) === 1;
+  const wideCodes = reader.readSync(1) === 1;
+  const italic = reader.readSync(1) === 1;
+  const bold = reader.readSync(1) === 1;
+  const languageCode = reader.readU8();
+  const fontNameLen = reader.readU8();
+  const fontNameBytes: number[] = [];
+  for (let i = 0; i < fontNameLen; i++) {
+    fontNameBytes.push(reader.readU8());
+  }
+  const fontName = String.fromCharCode(...fontNameBytes);
+  const numGlyphs = reader.readU16();
+
+  const glyphShapeTable: ShapeRecord[][] = [];
+  const codeTable: number[] = [];
+
+  if (numGlyphs > 0) {
+    // Read offset table to determine glyph boundaries
+    const offsets: number[] = [];
+    for (let i = 0; i < numGlyphs; i++) {
+      offsets.push(wideOffsets ? reader.readU32() : reader.readU16());
+    }
+    const codeTableOffset = wideOffsets ? reader.readU32() : reader.readU16();
+
+    // Compute glyph byte sizes from offsets
+    const glyphSizes: number[] = [];
+    for (let i = 0; i < numGlyphs - 1; i++) {
+      glyphSizes.push(offsets[i + 1] - offsets[i]);
+    }
+    glyphSizes.push(codeTableOffset - offsets[numGlyphs - 1]);
+
+    // Parse each glyph shape using sub-buffers
+    for (let i = 0; i < numGlyphs; i++) {
+      const byteOffset = reader.index / 8;
+      const glyphBytes = buffer.slice(byteOffset, byteOffset + glyphSizes[i]);
+      const glyphReader = Bitstream.fromBuffer(glyphBytes);
+      const numFillBits = glyphReader.readSync(4);
+      const numLineBits = glyphReader.readSync(4);
+      const records = parseShapeRecords(
+        glyphReader,
+        "Shape1",
+        numFillBits,
+        numLineBits,
+      );
+      glyphShapeTable.push(records);
+      // Advance main reader by glyph byte size
+      reader.index += glyphSizes[i] * 8;
+    }
+
+    // CodeTable: UI16[NumGlyphs]
+    for (let i = 0; i < numGlyphs; i++) {
+      codeTable.push(reader.readU16());
+    }
+  }
+
+  let fontAscent: number | undefined;
+  let fontDescent: number | undefined;
+  let fontLeading: number | undefined;
+  let fontAdvanceTable: number[] | undefined;
+  let fontBoundsTable: Rect[] | undefined;
+  let kerningTable:
+    | { code1: number; code2: number; adjustment: number }[]
+    | undefined;
+
+  if (hasLayout) {
+    fontAscent = readS16(reader);
+    fontDescent = readS16(reader);
+    fontLeading = readS16(reader);
+    fontAdvanceTable = [];
+    for (let i = 0; i < numGlyphs; i++) {
+      fontAdvanceTable.push(readS16(reader));
+    }
+    fontBoundsTable = [];
+    for (let i = 0; i < numGlyphs; i++) {
+      fontBoundsTable.push(parseRect(reader));
+    }
+    const kerningCount = reader.readU16();
+    kerningTable = [];
+    for (let i = 0; i < kerningCount; i++) {
+      // DefineFont3 always has wideCodes=1, so UI16+UI16+SI16
+      const code1 = reader.readU16();
+      const code2 = reader.readU16();
+      const adjustment = readS16(reader);
+      kerningTable.push({ code1, code2, adjustment });
+    }
+  }
+
+  return {
+    type: "DefineFont3",
+    fontId,
+    hasLayout,
+    shiftJIS,
+    smallText,
+    ansi,
+    wideOffsets,
+    wideCodes,
+    italic,
+    bold,
+    languageCode,
+    fontName,
+    numGlyphs,
+    glyphShapeTable,
+    codeTable,
+    fontAscent,
+    fontDescent,
+    fontLeading,
+    fontAdvanceTable,
+    fontBoundsTable,
+    kerningTable,
+  } satisfies Tag;
+};
+tagParsers[TagCode.DefineFontAlignZones] = (buffer) => {
+  const reader = Bitstream.fromBuffer(buffer);
+
+  const fontId = reader.readU16();
+  const csmTableHint = reader.readSync(2);
+  reader.readSync(6); // Reserved
+
+  const zoneTable: {
+    numZoneData: number;
+    zoneData: { alignmentCoordinate: number; range: number }[];
+    zoneMaskY: boolean;
+    zoneMaskX: boolean;
+  }[] = [];
+
+  // Derive glyph count from remaining bytes:
+  // Each ZONERECORD = 1 (NumZoneData) + NumZoneData*4 (FLOAT16 pairs) + 1 (mask byte)
+  // With NumZoneData always 2: 1 + 2*4 + 1 = 10 bytes per record
+  const remainingBytes = (reader.available / 8) | 0;
+  const numGlyphs = remainingBytes / 10;
+
+  for (let i = 0; i < numGlyphs; i++) {
+    const numZoneData = reader.readU8();
+    const zoneData: { alignmentCoordinate: number; range: number }[] = [];
+    for (let j = 0; j < numZoneData; j++) {
+      const alignmentCoordinate = reader.readFloat16();
+      const range = reader.readFloat16();
+      zoneData.push({ alignmentCoordinate, range });
+    }
+    reader.readSync(6); // Reserved
+    const zoneMaskY = reader.readSync(1) === 1;
+    const zoneMaskX = reader.readSync(1) === 1;
+    zoneTable.push({ numZoneData, zoneData, zoneMaskY, zoneMaskX });
+  }
+
+  return {
+    type: "DefineFontAlignZones",
+    fontId,
+    csmTableHint,
+    zoneTable,
+  } satisfies Tag;
+};
+tagParsers[TagCode.DefineEditText] = (buffer) => {
+  const reader = Bitstream.fromBuffer(buffer);
+
+  const characterId = reader.readU16();
+  const bounds = parseRect(reader);
+
+  const hasText = reader.readSync(1) === 1;
+  const wordWrap = reader.readSync(1) === 1;
+  const multiline = reader.readSync(1) === 1;
+  const password = reader.readSync(1) === 1;
+  const readOnly = reader.readSync(1) === 1;
+  const hasTextColor = reader.readSync(1) === 1;
+  const hasMaxLength = reader.readSync(1) === 1;
+  const hasFont = reader.readSync(1) === 1;
+  const hasFontClass = reader.readSync(1) === 1;
+  const autoSize = reader.readSync(1) === 1;
+  const hasLayout = reader.readSync(1) === 1;
+  const noSelect = reader.readSync(1) === 1;
+  const border = reader.readSync(1) === 1;
+  const wasStatic = reader.readSync(1) === 1;
+  const html = reader.readSync(1) === 1;
+  const useOutlines = reader.readSync(1) === 1;
+
+  const fontId = hasFont ? reader.readU16() : undefined;
+  const fontClass = hasFontClass
+    ? parseNullTerminatedString(reader)
+    : undefined;
+  const fontHeight = hasFont || hasFontClass ? reader.readU16() : undefined;
+  const textColor = hasTextColor
+    ? {
+        red: reader.readU8(),
+        green: reader.readU8(),
+        blue: reader.readU8(),
+        alpha: reader.readU8(),
+      }
+    : undefined;
+  const maxLength = hasMaxLength ? reader.readU16() : undefined;
+
+  const align = hasLayout ? reader.readU8() : undefined;
+  const leftMargin = hasLayout ? reader.readU16() : undefined;
+  const rightMargin = hasLayout ? reader.readU16() : undefined;
+  const indent = hasLayout ? reader.readU16() : undefined;
+  const leadingRaw = hasLayout ? reader.readU16() : undefined;
+  const leading =
+    leadingRaw !== undefined
+      ? leadingRaw >= 0x8000
+        ? leadingRaw - 0x10000
+        : leadingRaw
+      : undefined;
+
+  const variableName = parseNullTerminatedString(reader);
+  const initialText = hasText ? parseNullTerminatedString(reader) : undefined;
+
+  return {
+    type: "DefineEditText",
+    characterId,
+    bounds,
+    hasText,
+    wordWrap,
+    multiline,
+    password,
+    readOnly,
+    hasTextColor,
+    hasMaxLength,
+    hasFont,
+    hasFontClass,
+    autoSize,
+    hasLayout,
+    noSelect,
+    border,
+    wasStatic,
+    html,
+    useOutlines,
+    fontId,
+    fontClass,
+    fontHeight,
+    textColor,
+    maxLength,
+    align,
+    leftMargin,
+    rightMargin,
+    indent,
+    leading,
+    variableName,
+    initialText,
+  } satisfies Tag;
+};
+tagParsers[TagCode.DefineFontName] = (buffer) => {
+  const reader = Bitstream.fromBuffer(buffer);
+  const fontId = reader.readU16();
+  const fontName = parseNullTerminatedString(reader);
+  const fontCopyright = parseNullTerminatedString(reader);
+
+  return {
+    type: "DefineFontName",
+    fontId,
+    fontName,
+    fontCopyright,
+  } satisfies Tag;
+};
+const parseTextRecords = <C extends RGB | RGBA>(
+  reader: Bitstream,
+  glyphBits: number,
+  advanceBits: number,
+  parseColor: (reader: Bitstream) => C,
+): TextRecord<C>[] => {
+  const records: TextRecord<C>[] = [];
+
+  while (true) {
+    // Peek at the first byte — 0 means end of records
+    const firstByte = reader.readU8();
+    if (firstByte === 0) break;
+
+    // TextRecordType is UB[1] = 1 (already consumed as part of firstByte)
+    // StyleFlagsReserved UB[3] = 0
+    // StyleFlagsHasFont UB[1]
+    // StyleFlagsHasColor UB[1]
+    // StyleFlagsHasYOffset UB[1]
+    // StyleFlagsHasXOffset UB[1]
+    const hasFont = (firstByte & 0x08) !== 0;
+    const hasColor = (firstByte & 0x04) !== 0;
+    const hasYOffset = (firstByte & 0x02) !== 0;
+    const hasXOffset = (firstByte & 0x01) !== 0;
+
+    const fontId = hasFont ? reader.readU16() : undefined;
+    const textColor = hasColor ? parseColor(reader) : undefined;
+    const xOffset = hasXOffset ? readS16(reader) : undefined;
+    const yOffset = hasYOffset ? readS16(reader) : undefined;
+    const textHeight = hasFont ? reader.readU16() : undefined;
+
+    const glyphCount = reader.readU8();
+    const glyphEntries: GlyphEntry[] = [];
+    for (let i = 0; i < glyphCount; i++) {
+      const glyphIndex = reader.readSync(glyphBits);
+      const glyphAdvance = reader.readSigned(advanceBits);
+      glyphEntries.push({ glyphIndex, glyphAdvance });
+    }
+
+    // Byte-align after glyph entries (they're bit-packed)
+    const padding = (8 - (reader.index % 8)) % 8;
+    if (padding > 0) reader.readSync(padding);
+
+    records.push({
+      fontId,
+      textColor,
+      xOffset,
+      yOffset,
+      textHeight,
+      glyphEntries,
+    });
+  }
+
+  return records;
+};
+
+const parseDefineText = (
+  tagType: "DefineText" | "DefineText2",
+  buffer: Uint8Array,
+): Tag => {
+  const reader = Bitstream.fromBuffer(buffer);
+
+  const characterId = reader.readU16();
+  const textBounds = parseRect(reader);
+  const textMatrix = parseMatrixRecord(reader);
+  const glyphBits = reader.readU8();
+  const advanceBits = reader.readU8();
+
+  if (tagType === "DefineText2") {
+    const textRecords = parseTextRecords(
+      reader,
+      glyphBits,
+      advanceBits,
+      (r) =>
+        ({
+          red: r.readU8(),
+          green: r.readU8(),
+          blue: r.readU8(),
+          alpha: r.readU8(),
+        }) as RGBA,
+    );
+
+    return {
+      type: "DefineText2",
+      characterId,
+      textBounds,
+      textMatrix,
+      glyphBits,
+      advanceBits,
+      textRecords,
+    } satisfies Tag;
+  }
+
+  const textRecords = parseTextRecords(reader, glyphBits, advanceBits, (r) => ({
+    red: r.readU8(),
+    green: r.readU8(),
+    blue: r.readU8(),
+  }));
+
+  return {
+    type: "DefineText",
+    characterId,
+    textBounds,
+    textMatrix,
+    glyphBits,
+    advanceBits,
+    textRecords,
+  } satisfies Tag;
+};
+
+tagParsers[TagCode.DefineText] = (buffer) =>
+  parseDefineText("DefineText", buffer);
+tagParsers[TagCode.DefineText2] = (buffer) =>
+  parseDefineText("DefineText2", buffer);
+tagParsers[TagCode.DefineSprite] = (buffer) => {
+  const reader = Bitstream.fromBuffer(buffer);
+  const spriteId = reader.readU16();
+  const frameCount = reader.readU16();
+  const controlTags = parseTags(buffer.slice(4));
+
+  return {
+    type: "DefineSprite",
+    spriteId,
+    frameCount,
+    controlTags,
+  } satisfies Tag;
+};
+
+tagParsers[TagCode.FrameLabel] = (buffer) => {
+  const reader = Bitstream.fromBuffer(buffer);
+  const name = parseNullTerminatedString(reader);
+  const namedAnchor = reader.available >= 8 && reader.readU8() === 1;
+
+  return {
+    type: "FrameLabel",
+    name,
+    namedAnchor,
+  } satisfies Tag;
+};
+
+tagParsers[TagCode.RemoveObject] = (buffer) => {
+  const reader = Bitstream.fromBuffer(buffer);
+  const characterId = reader.readU16();
+  const depth = reader.readU16();
+  return { type: "RemoveObject", characterId, depth } satisfies Tag;
+};
+
+tagParsers[TagCode.RemoveObject2] = (buffer) => {
+  const reader = Bitstream.fromBuffer(buffer);
+  const depth = reader.readU16();
+  return { type: "RemoveObject2", depth } satisfies Tag;
+};
+
+tagParsers[TagCode.DoAction] = (buffer) => {
+  return { type: "DoAction", actions: buffer } satisfies Tag;
+};
 
 const parseTag = (
   buffer: Uint8Array,
