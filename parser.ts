@@ -230,19 +230,19 @@ const FillStyleCodeNames: Record<number, FillStyleType> = {
 
 type FillStyle<ColorType = RGB> =
   | {
-    type: SolidFillStyleType;
-    color: ColorType;
-  }
+      type: SolidFillStyleType;
+      color: ColorType;
+    }
   | {
-    type: BitmapFillStyleType;
-    gradientMatrix: Matrix;
-    gradient: Gradient;
-  }
+      type: BitmapFillStyleType;
+      gradientMatrix: Matrix;
+      gradient: Gradient;
+    }
   | {
-    type: BitmapFillStyleType;
-    bitmapId: number;
-    bitmapMatrix: Matrix;
-  };
+      type: BitmapFillStyleType;
+      bitmapId: number;
+      bitmapMatrix: Matrix;
+    };
 
 interface LineStyle<ColorType = RGB> {
   width: number;
@@ -261,29 +261,29 @@ type ShapeRecordType =
 
 type ShapeRecord =
   | {
-    type: "EndShape";
-  }
+      type: "EndShape";
+    }
   | {
-    type: "StyleChange";
-    moveTo?: { deltaX: number; deltaY: number };
-    fillStyle0?: number;
-    fillStyle1?: number;
-    lineStyle?: number;
-    newStyles?: { fillStyles: FillStyle[]; lineStyles: LineStyle[] };
-  }
+      type: "StyleChange";
+      moveTo?: { deltaX: number; deltaY: number };
+      fillStyle0?: number;
+      fillStyle1?: number;
+      lineStyle?: number;
+      newStyles?: { fillStyles: FillStyle[]; lineStyles: LineStyle[] };
+    }
   | {
-    type: "StraightEdge";
-    lineType: "General" | "Horizontal" | "Vertical";
-    deltaX: number;
-    deltaY: number;
-  }
+      type: "StraightEdge";
+      lineType: "General" | "Horizontal" | "Vertical";
+      deltaX: number;
+      deltaY: number;
+    }
   | {
-    type: "CurvedEdge";
-    controlDeltaX: number;
-    controlDeltaY: number;
-    anchorDeltaX: number;
-    anchorDeltaY: number;
-  };
+      type: "CurvedEdge";
+      controlDeltaX: number;
+      controlDeltaY: number;
+      anchorDeltaX: number;
+      anchorDeltaY: number;
+    };
 
 interface ShapeWithStyle {
   fillStyles: FillStyle[];
@@ -295,41 +295,41 @@ interface ShapeWithStyle {
 
 type Tag =
   | {
-    type: "SetBackgroundColor";
-    color: RGB;
-  }
+      type: "SetBackgroundColor";
+      color: RGB;
+    }
   | {
-    type: "FileAttributes";
-    useDirectBlit: boolean;
-    useGPU: boolean;
-    hasMetadata: boolean;
-    actionScript3: boolean;
-    useNetwork: boolean;
-  }
+      type: "FileAttributes";
+      useDirectBlit: boolean;
+      useGPU: boolean;
+      hasMetadata: boolean;
+      actionScript3: boolean;
+      useNetwork: boolean;
+    }
   | {
-    type: "DefineSceneAndFrameLabelData";
-    sceneCount: number;
-    scenes: Scene[];
-    frames: Frame[];
-  }
+      type: "DefineSceneAndFrameLabelData";
+      sceneCount: number;
+      scenes: Scene[];
+      frames: Frame[];
+    }
   | {
-    type: "DefineShape";
-    id: number;
-    bounds: Rect;
-    shapes: ShapeWithStyle;
-  }
+      type: "DefineShape";
+      id: number;
+      bounds: Rect;
+      shapes: ShapeWithStyle;
+    }
   | {
-    type: "DefineShape2";
-    id: number;
-    bounds: Rect;
-    shapes: ShapeWithStyle;
-  }
+      type: "DefineShape2";
+      id: number;
+      bounds: Rect;
+      shapes: ShapeWithStyle;
+    }
   | {
-    type: "DefineShape3";
-    id: number;
-    bounds: Rect;
-    shapes: ShapeWithStyle;
-  };
+      type: "DefineShape3";
+      id: number;
+      bounds: Rect;
+      shapes: ShapeWithStyle;
+    };
 
 const RECT_SIZE = 9;
 
@@ -386,18 +386,15 @@ type GradientRecordStuct = {
   color: RGBStruct | RGBAStruct; // RGB (Shape1 or Shape2) RGBA (Shape3)
 };
 
-const gradientRecordDeserialiser = new DeserialiserFactory<
-  GradientRecordStuct
->()
-  .field("ratio", u8())
-  .field(
-    "color",
-    (_, ctx) =>
+const gradientRecordDeserialiser =
+  new DeserialiserFactory<GradientRecordStuct>()
+    .field("ratio", u8())
+    .field("color", (_, ctx) =>
       ctx?.shapeType === "Shape3"
         ? struct(rgbaDeserialiser)
         : struct(rgbDeserialiser),
-  )
-  .build();
+    )
+    .build();
 
 type GradientStruct = {
   spreadMode: number; // UB[2]
@@ -410,9 +407,8 @@ const gradientDeserialiser = new DeserialiserFactory<GradientStruct>()
   .field("spreadMode", bytes(2))
   .field("interpolationMode", bytes(2))
   .field("numGradients", bytes(4))
-  .field(
-    "gradientRecords",
-    (x) => array(gradientRecordDeserialiser, x.numGradients as number),
+  .field("gradientRecords", (x) =>
+    array(gradientRecordDeserialiser, x.numGradients as number),
   )
   .build();
 
@@ -428,9 +424,8 @@ const focalGradientDeserialiser = new DeserialiserFactory<FocalGradientStruct>()
   .field("spreadMode", bytes(2))
   .field("interpolationMode", bytes(2))
   .field("numGradients", bytes(4))
-  .field(
-    "gradientRecords",
-    (x) => array(gradientRecordDeserialiser, x.numGradients as number),
+  .field("gradientRecords", (x) =>
+    array(gradientRecordDeserialiser, x.numGradients as number),
   )
   .field("focalPoint", u8()) // TODO: Fixed*
   .build();
@@ -467,9 +462,7 @@ export const parseHeader = (buffer: Uint8Array): SWFHeader => {
 
   // FrameSize (RECT)
   const rb = buffer.slice(8, 8 + RECT_SIZE);
-  console.log("rb", rb);
   const bitstream = new Bitstream(rb);
-  console.log("**", bitstream.buffer);
   const frameSize = parseRect(bitstream);
 
   // FrameRate
@@ -661,10 +654,7 @@ const readLittleEndian = (bitstream: Bitstream, length: number): number => {
     buffer += bitstream.readSync(1);
   }
 
-  const i = parseInt(buffer, 2);
-  console.log(buffer, i);
-
-  return i;
+  return parseInt(buffer, 2);
 };
 
 export const parseFillStyleArray = (
@@ -676,8 +666,6 @@ export const parseFillStyleArray = (
   if (itemCount === 0xff) {
     itemCount = readLittleEndian(bitstream, 16);
   }
-
-  console.log({ itemCount });
 
   const fillStyles: FillStyle[] = [];
 
@@ -811,7 +799,6 @@ const parseShapeRecord = (
     if (stateMoveTo) {
       // 130
       const moveBits = bitstream.readSync(5);
-      console.log("moveBits", moveBits);
       const deltaX = bitstream.readSigned(moveBits);
       const deltaY = bitstream.readSigned(moveBits);
       record.moveTo = { deltaX, deltaY };
@@ -830,7 +817,6 @@ const parseShapeRecord = (
     }
 
     if (stateNewStyles) {
-      console.log("here", bitstream);
       const fillStyles = parseFillStyleArray(bitstream, shapeType);
       const lineStyles = parseLineStyleArray(bitstream, shapeType);
 
@@ -839,8 +825,6 @@ const parseShapeRecord = (
 
       record.newStyles = { fillStyles, lineStyles };
     }
-
-    console.log("scr", record);
 
     return record;
   }
@@ -872,8 +856,6 @@ const parseShapeRecord = (
       record.deltaY = bitstream.readSigned(bitsPerValue + 2);
     }
 
-    console.log("r", record);
-
     return record;
   }
 
@@ -899,7 +881,6 @@ const parseShapeRecords = (
   numFillBits: number,
   numLineBits: number,
 ): ShapeRecord[] => {
-  console.log("\n*parseShapeRecords");
   const shapeRecords: ShapeRecord[] = [];
 
   while (reader.available > 0) {
@@ -927,28 +908,12 @@ const parseShapeWithStyle = (
   // NumLineBits UB[4] Number of line index bits.
   // ShapeRecords SHAPERECORD[one or more] Shape records
 
-  console.log("parseShapeWithStyle");
-
-  console.log("\n  fs");
-
-  console.log("-> bad data here 1");
-
   const fillStyles = parseFillStyleArray(bitstream, shapeType);
-
-  console.log("  /fs\n", fillStyles);
-
-  console.log("\n  ls");
 
   const lineStyles = parseLineStyleArray(bitstream, shapeType);
 
-  console.log("  /ls\n", lineStyles);
-
   const numFillBits = bitstream.readSync(4);
   const numLineBits = bitstream.readSync(4);
-
-  console.log({ numFillBits, numLineBits });
-
-  console.log("\n sr");
 
   const shapeRecords = parseShapeRecords(
     bitstream,
@@ -956,8 +921,6 @@ const parseShapeWithStyle = (
     numFillBits,
     numLineBits,
   );
-
-  console.log("  /sr\n");
 
   return { fillStyles, lineStyles, numFillBits, numLineBits, shapeRecords };
 };
@@ -980,18 +943,11 @@ tagParsers[TagCode.DefineShape] = (buffer) => {
 };
 
 tagParsers[TagCode.DefineShape2] = (buffer) => {
-  console.log("\n\n\n** DefineShape2");
-
   const reader = new Bitstream(buffer);
 
   const id = reader.readSync(2);
   const bounds = parseRect(reader);
-
-  console.log({ id, bounds });
-
-  console.log("\nsws");
   const shapes = parseShapeWithStyle(reader, "Shape2");
-  console.log("/sws", shapes);
 
   const tag: Tag = {
     type: "DefineShape2",
@@ -1008,9 +964,6 @@ const TODO = () => {
 };
 
 tagParsers[TagCode.DefineShape3] = (buffer) => {
-  console.log(buffer);
-  console.log("\n******\nparsing DefineShape3");
-
   const reader = new Bitstream(buffer);
 
   const id = new Uint16Array(buffer)[0];
@@ -1018,13 +971,7 @@ tagParsers[TagCode.DefineShape3] = (buffer) => {
   reader.readSync(16);
 
   const bounds = parseRect(reader);
-
-  console.log({ id, bounds });
-
-  console.log("\nsws");
   const shapes = parseShapeWithStyle(reader, "Shape3");
-
-  console.log("/sws\n");
 
   const tag: Tag = {
     type: "DefineShape3",
@@ -1037,7 +984,6 @@ tagParsers[TagCode.DefineShape3] = (buffer) => {
 };
 
 const TODO_PARSER = (name: string) => (_: Uint8Array) => {
-  console.log(`skipping: ${name}`);
   return null as unknown as Tag;
 };
 
@@ -1059,8 +1005,6 @@ const parseTag = (
     return { tag: null as unknown as Tag, nextTagStartIndex: buffer.length };
   }
 
-  console.log(`--- parseTag --- index: ${startIndex}`, startIndex);
-
   const tagCodeAndLength = new Uint16Array(
     buffer.slice(startIndex, startIndex + 2).buffer,
   )[0];
@@ -1073,8 +1017,6 @@ const parseTag = (
       TagTypeNames[tagCode] || tagCode
     }`;
   }
-
-  console.log(`  tag is: ${TagTypeNames[tagCode] || tagCode} `);
 
   // length is remaining 6 bits
   let length = tagCodeAndLength & 0b111111;
@@ -1126,15 +1068,12 @@ const parseTag = (
 };
 
 export const parseTags = (buffer: Uint8Array): Tag[] => {
-  console.log(" --- parseTags --- ", buffer.length);
-
   const tags: Tag[] = [];
 
   let index = 0;
   while (index < buffer.length) {
     const { tag, nextTagStartIndex } = parseTag(buffer, index);
     tags.push(tag);
-    console.log(tag);
     index = nextTagStartIndex;
   }
 

@@ -22,16 +22,11 @@ export class Bitstream {
       throw new Error("end of buffer");
     }
 
-    if (width === 5) {
-      console.log("  " + this.buffer.substring(this.index));
-    }
-
     // 011110000000000000000101010111110000000000000000000011111010000000000000
     // 01111000000000000000010101011111000000000000000000001111
     // 0000000000000000
 
     const s = this.buffer.substring(this.index, this.index + width);
-    console.log("  str: ", s);
     this.index += width;
 
     return parseInt(s, 2);

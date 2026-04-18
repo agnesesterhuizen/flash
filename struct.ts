@@ -1,6 +1,4 @@
-import { assertNotEquals } from "https://deno.land/std@0.187.0/testing/asserts.ts";
 import { Bitstream } from "./bitstream.ts";
-import { assertNotReached } from "./types.ts";
 
 export type Struct = {
   [key: string]: number | Struct | Struct[];
@@ -16,16 +14,16 @@ interface Deserialisable {
 
 type FieldDefinition<FieldName> =
   | {
-    kind: "FIELD";
-    name: FieldName;
-    type: DataType | Resolver<DataType>;
-  }
+      kind: "FIELD";
+      name: FieldName;
+      type: DataType | Resolver<DataType>;
+    }
   | {
-    kind: "CONDITIONAL_FIELD";
-    predicate: Resolver<boolean>;
-    name: FieldName;
-    type: DataType | Resolver<DataType>;
-  };
+      kind: "CONDITIONAL_FIELD";
+      predicate: Resolver<boolean>;
+      name: FieldName;
+      type: DataType | Resolver<DataType>;
+    };
 // | {
 //     kind: "STRUCT_FIELD";
 //     name: FieldName;
@@ -40,27 +38,27 @@ type FieldDefinition<FieldName> =
 
 type DataType =
   | {
-    type: "BYTES";
-    width: number;
-  }
+      type: "BYTES";
+      width: number;
+    }
   | {
-    type: "U8";
-  }
+      type: "U8";
+    }
   | {
-    type: "U16";
-  }
+      type: "U16";
+    }
   | {
-    type: "U32";
-  }
+      type: "U32";
+    }
   | {
-    type: "STRUCT";
-    t: Deserialisable;
-  }
+      type: "STRUCT";
+      t: Deserialisable;
+    }
   | {
-    type: "ARRAY";
-    t: Deserialisable;
-    length?: number;
-  };
+      type: "ARRAY";
+      t: Deserialisable;
+      length?: number;
+    };
 
 export const bit = (): DataType => ({ type: "BYTES", width: 1 });
 export const bytes = (width: number): DataType => ({ type: "BYTES", width });
@@ -97,11 +95,7 @@ export class Deserialiser<T extends Struct> implements Deserialisable {
 
       switch (t.type) {
         case "BYTES": {
-          console.log("\nreading " + t.width);
-          console.log("  index: ", bs.index);
-          const r = bs.read(t.width);
-          console.log("  read: ", r);
-          return r;
+          return bs.read(t.width);
         }
         case "U8":
           return bs.readU8();
@@ -127,7 +121,6 @@ export class Deserialiser<T extends Struct> implements Deserialisable {
               const s = t.t.deserialise(bs, context, parent);
               out.push(s);
             } catch (error) {
-              console.error(error);
               if (
                 !(error instanceof Error) ||
                 error.message !== "end of buffer"
@@ -146,16 +139,10 @@ export class Deserialiser<T extends Struct> implements Deserialisable {
     for (const fd of this.fieldDefinitions) {
       switch (fd.kind) {
         case "FIELD": {
-          if (fd.name === "data") {
-            console.log("h");
-          }
           fields[fd.name] = getData(fd.type);
           break;
         }
         case "CONDITIONAL_FIELD": {
-          if (fd.name === "data") {
-            console.log("h");
-          }
           const p = fd.predicate(fields, context);
           if (p) {
             const value = getData(fd.type);

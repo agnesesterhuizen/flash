@@ -10,10 +10,7 @@ export type RectStruct = {
 
 export const rectDeserialiser = new DeserialiserFactory<RectStruct>()
   .field("nBits", bytes(5))
-  .field("xMin", (x) => {
-    console.log("x", x);
-    return bytes(x.nBits as number);
-  })
+  .field("xMin", (x) => bytes(x.nBits as number))
   .field("xMax", (x) => bytes(x.nBits as number))
   .field("yMin", (x) => bytes(x.nBits as number))
   .field("yMax", (x) => bytes(x.nBits as number))
@@ -41,7 +38,8 @@ export const headerDeserialiser = new DeserialiserFactory<HeaderStruct>()
   .field("frameSizePadding", (x) =>
     bytes(
       (8 - ((5 + ((x.frameSize as RectStruct).nBits as number) * 4) % 8)) % 8,
-    ))
+    ),
+  )
   .field("frameRate", u16())
   .field("frameCount", u16())
   .build();
