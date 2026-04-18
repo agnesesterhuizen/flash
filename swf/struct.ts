@@ -1,4 +1,4 @@
-import { Bitstream } from "./bitstream.ts";
+import { Bitstream } from "../swf/bitstream.ts";
 
 export type Struct = {
   [key: string]: number | Struct | Struct[];
