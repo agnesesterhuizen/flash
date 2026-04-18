@@ -1,16 +1,5 @@
 import { Bitstream } from "./bitstream.ts";
-import {
-  array,
-  bit,
-  bytes,
-  Deserialiser,
-  DeserialiserFactory,
-  Resolver,
-  Struct,
-  struct,
-  u16,
-  u8,
-} from "./struct.ts";
+import { bit, bytes, DeserialiserFactory, u8 } from "./struct.ts";
 import { rectDeserialiser } from "./deserialisers.ts";
 
 const isParserDebugEnabled = () =>
@@ -213,8 +202,6 @@ interface Matrix {
   translateY: number;
 }
 
-interface Gradient {}
-
 type SolidFillStyleType = "SOLID";
 
 type GradientFillStyleType =
@@ -248,11 +235,6 @@ type FillStyle<ColorType = RGB> =
   | {
       type: SolidFillStyleType;
       color: ColorType;
-    }
-  | {
-      type: BitmapFillStyleType;
-      gradientMatrix: Matrix;
-      gradient: Gradient;
     }
   | {
       type: BitmapFillStyleType;
@@ -421,6 +403,13 @@ type Tag =
     }
   | {
       type: "ShowFrame";
+    }
+  | {
+      type: "Unimplemented";
+      tagType: string;
+    }
+  | {
+      type: "End";
     };
 
 const RECT_SIZE = 9;
@@ -522,55 +511,6 @@ const parseNullTerminatedString = (bitstream: Bitstream): string => {
   return String.fromCharCode(...chars);
 };
 
-type GradientRecordStuct = {
-  ratio: number; // UI8
-  color: RGBStruct | RGBAStruct; // RGB (Shape1 or Shape2) RGBA (Shape3)
-};
-
-const gradientRecordDeserialiser =
-  new DeserialiserFactory<GradientRecordStuct>()
-    .field("ratio", u8())
-    .field("color", (_, ctx) =>
-      ctx?.shapeType === "Shape3"
-        ? struct(rgbaDeserialiser)
-        : struct(rgbDeserialiser),
-    )
-    .build();
-
-type GradientStruct = {
-  spreadMode: number; // UB[2]
-  interpolationMode: number; // InterpolationMode UB[2]
-  numGradients: number; // UB[4]
-  gradientRecords: GradientRecordStuct[]; // GRADRECORD[nGrads]
-};
-
-const gradientDeserialiser = new DeserialiserFactory<GradientStruct>()
-  .field("spreadMode", bytes(2))
-  .field("interpolationMode", bytes(2))
-  .field("numGradients", bytes(4))
-  .field("gradientRecords", (x) =>
-    array(gradientRecordDeserialiser, x.numGradients as number),
-  )
-  .build();
-
-type FocalGradientStruct = {
-  spreadMode: number; // UB[2]
-  interpolationMode: number; // UB[2]
-  numGradients: number; // UB[4]
-  gradientRecords: GradientRecordStuct[]; // GRADRECORD[nGrads]
-  focalPoint: number; // FIXED8
-};
-
-const focalGradientDeserialiser = new DeserialiserFactory<FocalGradientStruct>()
-  .field("spreadMode", bytes(2))
-  .field("interpolationMode", bytes(2))
-  .field("numGradients", bytes(4))
-  .field("gradientRecords", (x) =>
-    array(gradientRecordDeserialiser, x.numGradients as number),
-  )
-  .field("focalPoint", u8()) // TODO: Fixed*
-  .build();
-
 export const parseHeader = (buffer: Uint8Array): SWFHeader => {
   // parse header
 
@@ -652,6 +592,10 @@ const rgbaDeserialiser = new DeserialiserFactory<RGBAStruct>()
   .field("alpha", u8())
   .build();
 
+tagParsers[TagCode.End] = () => {
+  return { type: "End" } satisfies Tag;
+};
+
 tagParsers[TagCode.ShowFrame] = () => {
   return { type: "ShowFrame" } satisfies Tag;
 };
@@ -659,36 +603,13 @@ tagParsers[TagCode.ShowFrame] = () => {
 tagParsers[TagCode.SetBackgroundColor] = (buffer) => {
   const color = rgbDeserialiser.deserialise(Bitstream.fromBuffer(buffer));
 
-  const tag: Tag = {
+  return {
     type: "SetBackgroundColor",
     color,
-  };
-
-  return tag;
+  } satisfies Tag;
 };
 
 tagParsers[TagCode.FileAttributes] = (buffer) => {
-  // const tag: Tag = {
-  //   // Header RECORDHEADER
-  //   type: "FileAttributes",
-  //   // Reserved UB[1]
-  //   reserved1: buffer[0] & 0b1000_0000,
-  //   // // UseDirectBlit UB[1]
-  //   useDirectBlit: (buffer[0] & 0b0100_0000) > 0,
-  //   // // UseGPU  UB[1]
-  //   useGPU: (buffer[0] & 0b0010_0000) > 0,
-  //   // // HasMetadata UB[1]
-  //   hasMetadata: (buffer[0] & 0b0001_0000) > 0,
-  //   // // ActionScript3 UB[1]
-  //   actionScript3: (buffer[0] & 0b0000_1000) > 0,
-  //   // // Reserved UB[2]
-  //   reserved2: buffer[0] & 0b0000_0110,
-  //   // // UseNetwork UB[1]
-  //   useNetwork: (buffer[0] & 0b0000_0001) > 0,
-  //   // // Reserved UB[24]
-  //   reserved3: buffer[1] & (buffer[2] << 8) & (buffer[3] << 16),
-  // };
-
   type FileAttributesStruct = {
     // Reserved UB[1]
     reserved: number;
@@ -721,58 +642,14 @@ tagParsers[TagCode.FileAttributes] = (buffer) => {
 
   const s = deserialiser.deserialise(Bitstream.fromBuffer(buffer));
 
-  const tag: Tag = {
+  return {
     type: "FileAttributes",
     useDirectBlit: Boolean(s.useDirectBlit),
     useGPU: Boolean(s.useGPU),
     hasMetadata: Boolean(s.hasMetadata),
     actionScript3: Boolean(s.actionScript3),
     useNetwork: Boolean(s.useNetwork),
-  };
-
-  return tag;
-};
-
-// TODO: figure this all out
-const parseMatrix = (buffer: Uint8Array): Matrix => {
-  //     reserved1: buffer[0] & 0b1000_0000,
-
-  let nextFieldBitIndex = 0;
-
-  // HasScale UB[1]
-  const hasScale = (buffer[0] & (1 << nextFieldBitIndex)) === 1;
-  nextFieldBitIndex += 1;
-
-  let scaleX = 1;
-  let scaleY = 1;
-
-  let rotateSkew0 = 1;
-  let rotateSkew1 = 1;
-
-  let translateX = 0;
-  let translateY = 0;
-
-  // pg 22
-
-  if (hasScale) {
-    // NScaleBits If HasScale = 1, UB[5]
-    const nScaleBits = buffer[0] & (0b0011_1110 >> 1);
-    //ScaleX If HasScale = 1, FB[NScaleBits]
-    //ScaleY If HasScale = 1, FB[NScaleBits]
-    nextFieldBitIndex += 5 + nScaleBits * 2;
-
-    throw "TODO: figure out how to parse FB[nBits]";
-  }
-
-  const hasRotateByte = Math.floor(nextFieldBitIndex / 8);
-  const hasRotateBitIndex = nextFieldBitIndex - hasRotateByte * 8;
-  const hasRotate = (buffer[hasRotateByte] & (1 << hasRotateBitIndex)) === 1;
-
-  if (hasRotate) {
-    const nRotateBits = buffer[0] & (0b0011_1110 >> 1);
-  }
-
-  return { scaleX, scaleY, rotateSkew0, rotateSkew1, translateX, translateY };
+  } satisfies Tag;
 };
 
 const parseRGB = (n: number): RGB => {
@@ -792,25 +669,15 @@ const parseRGBA = (n: number): RGBA => {
   };
 };
 
-const readLittleEndian = (bitstream: Bitstream, length: number): number => {
-  let buffer = "";
-
-  for (let i = 0; i < length; i++) {
-    buffer += bitstream.readSync(1);
-  }
-
-  return parseInt(buffer, 2);
-};
-
 export const parseFillStyleArray = (
   bitstream: Bitstream,
   shapeType: ShapeType,
 ): FillStyle[] => {
   const startIndex = bitstream.index;
-  let itemCount = readLittleEndian(bitstream, 8);
+  let itemCount = bitstream.readU8();
 
   if (itemCount === 0xff) {
-    itemCount = readLittleEndian(bitstream, 16);
+    itemCount = bitstream.readU16();
   }
 
   parserDebugLog("fillStyles", "read fill style count", {
@@ -868,15 +735,15 @@ export const parseFillStyleArray = (
   return fillStyles;
 };
 
-const parseLineStyleArray = (
+export const parseLineStyleArray = (
   bitstream: Bitstream,
   shapeType: ShapeType,
 ): LineStyle[] => {
   const startIndex = bitstream.index;
-  let itemCount = bitstream.readSync(8);
+  let itemCount = bitstream.readU8();
 
   if (itemCount === 0xff) {
-    itemCount = bitstream.readSync(16);
+    itemCount = bitstream.readU16();
   }
 
   parserDebugLog("lineStyles", "read line style count", {
@@ -936,7 +803,7 @@ const parseLineStyleArray = (
       available: bitstream.available,
     });
 
-    const width = bitstream.readSync(16);
+    const width = bitstream.readU16();
     const isRGBA = shapeType === "Shape3";
     const colorBytes = isRGBA ? 4 : 3;
     const colorValue = bitstream.readSync(colorBytes * 8);
@@ -946,15 +813,6 @@ const parseLineStyleArray = (
   }
 
   return lineStyles;
-};
-
-// When an unsigned-bit value is expanded into a larger word size,
-// the leftmost bits are filled with zeros.
-// When a signed-bit value is expanded into a larger word size,
-// the high bit is copied to the leftmost bits.
-const readSb = (bitstream: Bitstream, length: number) => {
-  const bits = bitstream.read(length);
-  const highBit = (bits >> length) & 1;
 };
 
 const getShapeRecordFlags = (flags: number) => {
@@ -1222,59 +1080,47 @@ const parseShapeWithStyle = (
 tagParsers[TagCode.DefineShape] = (buffer) => {
   const reader = new Bitstream(buffer);
 
-  const id = reader.readSync(16);
+  const id = reader.readU16();
   const bounds = parseRect(reader);
   const shapes = parseShapeWithStyle(reader, "Shape1");
 
-  const tag: Tag = {
+  return {
     type: "DefineShape",
     id,
     bounds,
     shapes,
-  };
-
-  return tag;
+  } satisfies Tag;
 };
 
 tagParsers[TagCode.DefineShape2] = (buffer) => {
   const reader = new Bitstream(buffer);
 
-  const id = reader.readSync(16);
+  const id = reader.readU16();
   const bounds = parseRect(reader);
   const shapes = parseShapeWithStyle(reader, "Shape2");
 
-  const tag: Tag = {
+  return {
     type: "DefineShape2",
     id,
     bounds,
     shapes,
-  };
-
-  return tag;
-};
-
-const TODO = () => {
-  throw new Error("TODO");
+  } satisfies Tag;
 };
 
 tagParsers[TagCode.DefineShape3] = (buffer) => {
   const reader = new Bitstream(buffer);
 
-  const id = new Uint16Array(buffer)[0];
-  // skip, TODO: figure out byte ordering
-  reader.readSync(16);
+  const id = reader.readU16();
 
   const bounds = parseRect(reader);
   const shapes = parseShapeWithStyle(reader, "Shape3");
 
-  const tag: Tag = {
+  return {
     type: "DefineShape3",
     id,
     bounds,
     shapes,
-  };
-
-  return tag;
+  } satisfies Tag;
 };
 
 tagParsers[TagCode.DefineShape4] = (buffer) => {
@@ -1425,9 +1271,11 @@ tagParsers[TagCode.SymbolClass] = (buffer) => {
   } satisfies Tag;
 };
 
-const TODO_PARSER = (name: string) => (_: Uint8Array) => {
-  return null as unknown as Tag;
-};
+const TODO_PARSER =
+  (name: string) =>
+  (_: Uint8Array): Tag => {
+    return { type: "Unimplemented", tagType: name };
+  };
 
 tagParsers[TagCode.DefineSceneAndFrameLabelData] = TODO_PARSER(
   "DefineSceneAndFrameLabelData",
@@ -1444,7 +1292,7 @@ const parseTag = (
   startIndex: number,
 ): { tag: Tag; nextTagStartIndex: number } => {
   if (startIndex + 2 > buffer.length) {
-    return { tag: null as unknown as Tag, nextTagStartIndex: buffer.length };
+    throw `parseTag: unexpected end of buffer at index ${startIndex}`;
   }
 
   const tagCodeAndLength = new Uint16Array(
@@ -1468,11 +1316,11 @@ const parseTag = (
   // The last six unsigned bits of the tag header indicate the length of the data block to
   // follow if it is 62 bytes or less. If the length of the data block is more than 62 bytes,
   // then this field has all 1s and the length is indicated in the following dword
-  if (length > 62) {
-    const dv = new DataView(
-      buffer.slice(startIndex + 2, startIndex + 6).reverse().buffer,
+  if (length === 0x3f) {
+    length = new DataView(buffer.buffer, buffer.byteOffset).getUint32(
+      startIndex + 2,
+      true,
     );
-    length = dv.getUint32(0);
     attributesStartIndex = startIndex + 6;
   }
 
@@ -1496,25 +1344,6 @@ const parseTag = (
     tag,
     nextTagStartIndex: attributesStartIndex + length,
   };
-
-  // case TagCode.FileAttributes:
-  // case TagCode.DefineSceneAndFrameLabelData:
-  // case TagCode.DefineShape:
-  // case TagCode.DefineShape2:
-  // case TagCode.DefineShape3:
-  // case TagCode.DefineShape4:
-  // case TagCode.DefineFontName:
-  // case TagCode.DefineFont3:
-  // case TagCode.DefineText:
-  // case TagCode.DefineFontAlignZones:
-  // case TagCode.DefineEditText:
-  // case TagCode.DefineSprite:
-  // case TagCode.DefineBitsLossless:
-  // case TagCode.DefineBitsLossless2:
-  // case TagCode.PlaceObject2:
-  // case TagCode.SymbolClass:
-  // case TagCode.ShowFrame:
-  // case TagCode.DoABC:
 };
 
 export const parseTags = (buffer: Uint8Array): Tag[] => {
@@ -1524,31 +1353,11 @@ export const parseTags = (buffer: Uint8Array): Tag[] => {
   while (index < buffer.length) {
     const { tag, nextTagStartIndex } = parseTag(buffer, index);
     tags.push(tag);
+    if (tag.type === "End") {
+      break;
+    }
     index = nextTagStartIndex;
   }
 
   return tags;
 };
-
-// ITEM TYPES
-// FileAttributes
-// SetBackgroundColor
-// DefineSceneAndFrameLabelData
-// DefineShape3
-// DefineFont3
-// DefineFontAlignZones
-// DefineEditText
-// DefineShape
-
-// DefineFontName
-
-// DefineText
-// DefineSprite
-// DefineShape2
-// DefineBitsLossless2
-// PlaceObject2
-// DefineBitsLossless
-// DefineShape4
-// DoABC2
-// SymbolClass
-// ShowFrame

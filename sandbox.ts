@@ -10,5 +10,5 @@ const buffer = new Uint8Array(arrayBuffer);
 const header = parseHeader(buffer);
 console.log(header);
 
-const tags = parseTags(buffer.slice(21, -1));
+const tags = parseTags(buffer.slice(21));
 console.log(tags);
