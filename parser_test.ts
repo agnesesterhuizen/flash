@@ -62,24 +62,86 @@ Deno.test("parseHeader - prm.swf", async () => {
 // -0000_00010-_0000_0000
 // -000_00010_0-000_0000
 Deno.test("parseFillStyleArray - empty", () => {
-  const buffer = new Uint8Array([254, 0, 0]);
+  const buffer = new Uint8Array([0]);
   const bitstream = Bitstream.fromBuffer(buffer);
 
   const result = parseFillStyleArray(bitstream, "Shape1");
   assertEquals(0, result.length);
 });
 
-Deno.test(
-  "parseFillStyleArray - extended count currently still returns empty",
-  () => {
-    const buffer = new Uint8Array([0xff, 0x00, 0x02, 0xaa, 0xbb, 0xcc]);
-    const bitstream = Bitstream.fromBuffer(buffer);
+Deno.test("parseFillStyleArray - solid rgb fill", () => {
+  const buffer = new Uint8Array([0x01, 0x00, 0x12, 0x34, 0x56]);
+  const bitstream = Bitstream.fromBuffer(buffer);
 
-    const result = parseFillStyleArray(bitstream, "Shape1");
+  const result = parseFillStyleArray(bitstream, "Shape1");
 
-    assertEquals([], result);
-  },
-);
+  assertEquals(
+    [{ type: "SOLID", color: { red: 0x12, green: 0x34, blue: 0x56 } }],
+    result,
+  );
+});
+
+Deno.test("parseFillStyleArray - solid rgba fill", () => {
+  const buffer = new Uint8Array([0x01, 0x00, 0x12, 0x34, 0x56, 0x78]);
+  const bitstream = Bitstream.fromBuffer(buffer);
+
+  const result = parseFillStyleArray(bitstream, "Shape3");
+
+  assertEquals(
+    [
+      {
+        type: "SOLID",
+        color: { red: 0x12, green: 0x34, blue: 0x56, alpha: 0x78 },
+      },
+    ],
+    result,
+  );
+});
+
+Deno.test("parseFillStyleArray - unsupported gradient fill throws", () => {
+  const buffer = new Uint8Array([0x01, 0x10]);
+  const bitstream = Bitstream.fromBuffer(buffer);
+
+  let thrown;
+
+  try {
+    parseFillStyleArray(bitstream, "Shape1");
+  } catch (error) {
+    thrown = error;
+  }
+
+  assertEquals(
+    "parseFillStyleArray: unsupported gradient fill style type: LINEAR_GRADIENT",
+    thrown,
+  );
+});
+
+Deno.test("parseFillStyleArray - bitmap fill", () => {
+  const buffer = new Uint8Array([
+    0x01, 0x43, 0x34, 0x12, 0b0000_0100, 0b0000_0000,
+  ]);
+  const bitstream = Bitstream.fromBuffer(buffer);
+
+  const result = parseFillStyleArray(bitstream, "Shape1");
+
+  assertEquals(
+    [
+      {
+        type: "NON_SMOOTHED_CLIPPED_BITMAP",
+        bitmapId: 0x1234,
+        bitmapMatrix: {
+          scaleX: 1,
+          scaleY: 1,
+          rotateSkew0: 0,
+          rotateSkew1: 0,
+          translateX: 0,
+          translateY: 0,
+        },
+      },
+    ],
+    result,
+  );
+});
 
 Deno.test("parseTags - empty buffer", () => {
   assertEquals([], parseTags(new Uint8Array()));
@@ -137,6 +199,49 @@ Deno.test("parseTags - extended length tag header", () => {
     {
       type: "SetBackgroundColor",
       color: { red: 1, green: 2, blue: 3 },
+    },
+    tags[0],
+  );
+});
+
+Deno.test("parseTags - DefineBitsLossless2 colormapped image", () => {
+  const tags = parseTags(
+    makeShortTag(
+      36,
+      [0x34, 0x12, 0x03, 0x20, 0x00, 0x10, 0x00, 0x07, 0xaa, 0xbb, 0xcc],
+    ),
+  );
+
+  assertEquals(1, tags.length);
+  assertEquals(
+    {
+      type: "DefineBitsLossless2",
+      characterId: 0x1234,
+      bitmapFormat: 3,
+      bitmapWidth: 0x0020,
+      bitmapHeight: 0x0010,
+      bitmapColorTableSize: 0x07,
+      zlibBitmapData: new Uint8Array([0xaa, 0xbb, 0xcc]),
+    },
+    tags[0],
+  );
+});
+
+Deno.test("parseTags - DefineBitsLossless2 argb image", () => {
+  const tags = parseTags(
+    makeShortTag(36, [0x02, 0x00, 0x05, 0x08, 0x00, 0x04, 0x00, 0xde, 0xad]),
+  );
+
+  assertEquals(1, tags.length);
+  assertEquals(
+    {
+      type: "DefineBitsLossless2",
+      characterId: 2,
+      bitmapFormat: 5,
+      bitmapWidth: 8,
+      bitmapHeight: 4,
+      bitmapColorTableSize: undefined,
+      zlibBitmapData: new Uint8Array([0xde, 0xad]),
     },
     tags[0],
   );

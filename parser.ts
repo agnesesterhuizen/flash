@@ -345,12 +345,35 @@ type Tag =
       id: number;
       bounds: Rect;
       shapes: ShapeWithStyle;
+    }
+  | {
+      type: "DefineBitsLossless2";
+      characterId: number;
+      bitmapFormat: number;
+      bitmapWidth: number;
+      bitmapHeight: number;
+      bitmapColorTableSize?: number;
+      zlibBitmapData: Uint8Array;
     };
 
 const RECT_SIZE = 9;
 
+const readU16LE = (buffer: Uint8Array, offset: number) =>
+  new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength).getUint16(
+    offset,
+    true,
+  );
+
 const parseRect = (bs: Bitstream): Rect => {
-  return rectDeserialiser.deserialise(bs);
+  const rect = rectDeserialiser.deserialise(bs);
+  const rectBitLength = 5 + rect.nBits * 4;
+  const padding = (8 - (rectBitLength % 8)) % 8;
+
+  if (padding > 0) {
+    bs.readSync(padding);
+  }
+
+  return rect;
 };
 
 type MatrixStruct = {
@@ -396,6 +419,19 @@ const matrixDeserialiser = new DeserialiserFactory<MatrixStruct>()
   .field("translateX", (x) => bytes(x.nTranslateBits as number))
   .field("translateY", (x) => bytes(x.nTranslateBits as number))
   .build();
+
+const parseMatrixRecord = (bitstream: Bitstream): Matrix => {
+  const s = matrixDeserialiser.deserialise(bitstream);
+
+  return {
+    scaleX: (s.scaleX as number | undefined) ?? 1,
+    scaleY: (s.scaleY as number | undefined) ?? 1,
+    rotateSkew0: (s.rotateSkew0 as number | undefined) ?? 0,
+    rotateSkew1: (s.rotateSkew1 as number | undefined) ?? 0,
+    translateX: (s.translateX as number | undefined) ?? 0,
+    translateY: (s.translateY as number | undefined) ?? 0,
+  };
+};
 
 type GradientRecordStuct = {
   ratio: number; // UI8
@@ -648,18 +684,18 @@ const parseMatrix = (buffer: Uint8Array): Matrix => {
 
 const parseRGB = (n: number): RGB => {
   return {
-    red: (n & (0xff << 0)) >> 0,
-    green: (n & (0xff << 1)) >> 1,
-    blue: (n & (0xff << 2)) >> 2,
+    red: (n >> 16) & 0xff,
+    green: (n >> 8) & 0xff,
+    blue: n & 0xff,
   };
 };
 
 const parseRGBA = (n: number): RGBA => {
   return {
-    red: (n & (0xff << 0)) >> 0,
-    green: (n & (0xff << 1)) >> 1,
-    blue: (n & (0xff << 2)) >> 2,
-    alpha: (n & (0xff << 3)) >> 3,
+    red: (n >> 24) & 0xff,
+    green: (n >> 16) & 0xff,
+    blue: (n >> 8) & 0xff,
+    alpha: n & 0xff,
   };
 };
 
@@ -693,58 +729,50 @@ export const parseFillStyleArray = (
 
   const fillStyles: FillStyle[] = [];
 
-  if (itemCount > 0) {
-    parserDebugLog("fillStyles", "returning early without consuming styles", {
-      shapeType,
-      itemCount,
-      currentIndex: bitstream.index,
-      available: bitstream.available,
-    });
+  while (fillStyles.length < itemCount) {
+    const typeCode = bitstream.readSync(8);
+
+    if (!(typeCode in FillStyleCodeNames)) {
+      throw `parseFillStyleArray: encountered unknown fill style type: ${typeCode}`;
+    }
+
+    const type = FillStyleCodeNames[typeCode];
+
+    switch (type) {
+      case "SOLID": {
+        const isRGBA = shapeType === "Shape3";
+        const colorBytes = isRGBA ? 4 : 3;
+        const colorValue = bitstream.readSync(colorBytes * 8);
+        const color = isRGBA ? parseRGBA(colorValue) : parseRGB(colorValue);
+
+        fillStyles.push({
+          type,
+          color,
+        });
+        break;
+      }
+      case "LINEAR_GRADIENT":
+      case "RADIAL_GRADIENT":
+      case "FOCAL_RADIAL_GRADIENT":
+        throw `parseFillStyleArray: unsupported gradient fill style type: ${type}`;
+      case "REPEATING_BITMAP":
+      case "CLIPPED_BITMAP":
+      case "NON_SMOOTHED_REPEATING_BITMAP":
+      case "NON_SMOOTHED_CLIPPED_BITMAP": {
+        const bitmapId = bitstream.readU16();
+        const bitmapMatrix = parseMatrixRecord(bitstream);
+
+        fillStyles.push({
+          type,
+          bitmapId,
+          bitmapMatrix,
+        });
+        break;
+      }
+    }
   }
 
   return fillStyles;
-
-  // while (fillStyles.length < itemCount) {
-  //   console.log("loop");
-  //   const typeCode = bitstream.readSync(8);
-
-  //   console.log({ typeCode });
-
-  //   if (!(typeCode in FillStyleCodeNames)) {
-  //     throw `parseFillStyleArray: encountered unknown fill style type: ${typeCode}`;
-  //   }
-
-  //   const type = FillStyleCodeNames[typeCode];
-
-  //   switch (type) {
-  //     case "SOLID": {
-  //       const isRGBA = shapeType === "Shape3";
-  //       const colorBytes = isRGBA ? 4 : 3;
-  //       const colorValue = bitstream.readSync(colorBytes * 8);
-  //       const color = isRGBA ? parseRGBA(colorValue) : parseRGB(colorValue);
-
-  //       const fillStyle = {
-  //         type,
-  //         color,
-  //       };
-
-  //       fillStyles.push(fillStyle);
-  //       break;
-  //     }
-  //     case "LINEAR_GRADIENT":
-  //     case "RADIAL_GRADIENT":
-  //     case "FOCAL_RADIAL_GRADIENT":
-  //       throw "TODO: parseFillStyleArray gradient";
-  //     case "REPEATING_BITMAP":
-  //     case "CLIPPED_BITMAP":
-  //     case "NON_SMOOTHED_REPEATING_BITMAP":
-  //     case "NON_SMOOTHED_CLIPPED_BITMAP": {
-  //       throw "TODO: parseFillStyleArray bitmap";
-  //     }
-  //   }
-  // }
-
-  // return fillStyles;
 };
 
 const parseLineStyleArray = (
@@ -835,8 +863,9 @@ const parseShapeRecord = (
   });
 
   if (!isEdgeRecord) {
-    const isEndOfShape = bitstream.readSync(5) === 0;
-    if (isEndOfShape) {
+    const flags = bitstream.readSync(5);
+
+    if (flags === 0) {
       parserDebugLog("shapeRecord", "end shape record", {
         currentIndex: bitstream.index,
       });
@@ -846,8 +875,6 @@ const parseShapeRecord = (
     //StyleChangeRecord
 
     const record: ShapeRecord = { type: "StyleChange" };
-
-    const flags = bitstream.readSync(5);
 
     const {
       stateNewStyles,
@@ -892,6 +919,11 @@ const parseShapeRecord = (
         currentIndex: bitstream.index,
         available: bitstream.available,
       });
+
+      const padding = (8 - (bitstream.index % 8)) % 8;
+      if (padding > 0) {
+        bitstream.readSync(padding);
+      }
 
       const fillStyles = parseFillStyleArray(bitstream, shapeType);
       const lineStyles = parseLineStyleArray(bitstream, shapeType);
@@ -1047,7 +1079,7 @@ const parseShapeWithStyle = (
 tagParsers[TagCode.DefineShape] = (buffer) => {
   const reader = new Bitstream(buffer);
 
-  const id = reader.readSync(2);
+  const id = reader.readSync(16);
   const bounds = parseRect(reader);
   const shapes = parseShapeWithStyle(reader, "Shape1");
 
@@ -1064,7 +1096,7 @@ tagParsers[TagCode.DefineShape] = (buffer) => {
 tagParsers[TagCode.DefineShape2] = (buffer) => {
   const reader = new Bitstream(buffer);
 
-  const id = reader.readSync(2);
+  const id = reader.readSync(16);
   const bounds = parseRect(reader);
   const shapes = parseShapeWithStyle(reader, "Shape2");
 
@@ -1100,6 +1132,35 @@ tagParsers[TagCode.DefineShape3] = (buffer) => {
   };
 
   return tag;
+};
+
+tagParsers[TagCode.DefineBitsLossless2] = (buffer) => {
+  const characterId = readU16LE(buffer, 0);
+  const bitmapFormat = buffer[2];
+  const bitmapWidth = readU16LE(buffer, 3);
+  const bitmapHeight = readU16LE(buffer, 5);
+
+  let index = 7;
+  let bitmapColorTableSize: number | undefined;
+
+  if (bitmapFormat === 3) {
+    bitmapColorTableSize = buffer[index];
+    index += 1;
+  } else if (bitmapFormat !== 5) {
+    throw `DefineBitsLossless2: unsupported bitmap format ${bitmapFormat}`;
+  }
+
+  const zlibBitmapData = buffer.slice(index);
+
+  return {
+    type: "DefineBitsLossless2",
+    characterId,
+    bitmapFormat,
+    bitmapWidth,
+    bitmapHeight,
+    bitmapColorTableSize,
+    zlibBitmapData,
+  } satisfies Tag;
 };
 
 const TODO_PARSER = (name: string) => (_: Uint8Array) => {
