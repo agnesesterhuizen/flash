@@ -1,15 +1,15 @@
 import { Bitstream } from "./bitstream.ts";
 import {
-  Deserialiser,
-  DeserialiserFactory,
+  array,
   bit,
   bytes,
-  u8,
-  u16,
-  struct,
-  array,
+  Deserialiser,
+  DeserialiserFactory,
   Resolver,
   Struct,
+  struct,
+  u16,
+  u8,
 } from "./struct.ts";
 import { rectDeserialiser } from "./deserialisers.ts";
 
@@ -230,19 +230,19 @@ const FillStyleCodeNames: Record<number, FillStyleType> = {
 
 type FillStyle<ColorType = RGB> =
   | {
-      type: SolidFillStyleType;
-      color: ColorType;
-    }
+    type: SolidFillStyleType;
+    color: ColorType;
+  }
   | {
-      type: BitmapFillStyleType;
-      gradientMatrix: Matrix;
-      gradient: Gradient;
-    }
+    type: BitmapFillStyleType;
+    gradientMatrix: Matrix;
+    gradient: Gradient;
+  }
   | {
-      type: BitmapFillStyleType;
-      bitmapId: number;
-      bitmapMatrix: Matrix;
-    };
+    type: BitmapFillStyleType;
+    bitmapId: number;
+    bitmapMatrix: Matrix;
+  };
 
 interface LineStyle<ColorType = RGB> {
   width: number;
@@ -261,29 +261,29 @@ type ShapeRecordType =
 
 type ShapeRecord =
   | {
-      type: "EndShape";
-    }
+    type: "EndShape";
+  }
   | {
-      type: "StyleChange";
-      moveTo?: { deltaX: number; deltaY: number };
-      fillStyle0?: number;
-      fillStyle1?: number;
-      lineStyle?: number;
-      newStyles?: { fillStyles: FillStyle[]; lineStyles: LineStyle[] };
-    }
+    type: "StyleChange";
+    moveTo?: { deltaX: number; deltaY: number };
+    fillStyle0?: number;
+    fillStyle1?: number;
+    lineStyle?: number;
+    newStyles?: { fillStyles: FillStyle[]; lineStyles: LineStyle[] };
+  }
   | {
-      type: "StraightEdge";
-      lineType: "General" | "Horizontal" | "Vertical";
-      deltaX: number;
-      deltaY: number;
-    }
+    type: "StraightEdge";
+    lineType: "General" | "Horizontal" | "Vertical";
+    deltaX: number;
+    deltaY: number;
+  }
   | {
-      type: "CurvedEdge";
-      controlDeltaX: number;
-      controlDeltaY: number;
-      anchorDeltaX: number;
-      anchorDeltaY: number;
-    };
+    type: "CurvedEdge";
+    controlDeltaX: number;
+    controlDeltaY: number;
+    anchorDeltaX: number;
+    anchorDeltaY: number;
+  };
 
 interface ShapeWithStyle {
   fillStyles: FillStyle[];
@@ -295,41 +295,41 @@ interface ShapeWithStyle {
 
 type Tag =
   | {
-      type: "SetBackgroundColor";
-      color: RGB;
-    }
+    type: "SetBackgroundColor";
+    color: RGB;
+  }
   | {
-      type: "FileAttributes";
-      useDirectBlit: boolean;
-      useGPU: boolean;
-      hasMetadata: boolean;
-      actionScript3: boolean;
-      useNetwork: boolean;
-    }
+    type: "FileAttributes";
+    useDirectBlit: boolean;
+    useGPU: boolean;
+    hasMetadata: boolean;
+    actionScript3: boolean;
+    useNetwork: boolean;
+  }
   | {
-      type: "DefineSceneAndFrameLabelData";
-      sceneCount: number;
-      scenes: Scene[];
-      frames: Frame[];
-    }
+    type: "DefineSceneAndFrameLabelData";
+    sceneCount: number;
+    scenes: Scene[];
+    frames: Frame[];
+  }
   | {
-      type: "DefineShape";
-      id: number;
-      bounds: Rect;
-      shapes: ShapeWithStyle;
-    }
+    type: "DefineShape";
+    id: number;
+    bounds: Rect;
+    shapes: ShapeWithStyle;
+  }
   | {
-      type: "DefineShape2";
-      id: number;
-      bounds: Rect;
-      shapes: ShapeWithStyle;
-    }
+    type: "DefineShape2";
+    id: number;
+    bounds: Rect;
+    shapes: ShapeWithStyle;
+  }
   | {
-      type: "DefineShape3";
-      id: number;
-      bounds: Rect;
-      shapes: ShapeWithStyle;
-    };
+    type: "DefineShape3";
+    id: number;
+    bounds: Rect;
+    shapes: ShapeWithStyle;
+  };
 
 const RECT_SIZE = 9;
 
@@ -386,15 +386,18 @@ type GradientRecordStuct = {
   color: RGBStruct | RGBAStruct; // RGB (Shape1 or Shape2) RGBA (Shape3)
 };
 
-const gradientRecordDeserialiser =
-  new DeserialiserFactory<GradientRecordStuct>()
-    .field("ratio", u8())
-    .field("color", (_, ctx) =>
+const gradientRecordDeserialiser = new DeserialiserFactory<
+  GradientRecordStuct
+>()
+  .field("ratio", u8())
+  .field(
+    "color",
+    (_, ctx) =>
       ctx?.shapeType === "Shape3"
         ? struct(rgbaDeserialiser)
         : struct(rgbDeserialiser),
-    )
-    .build();
+  )
+  .build();
 
 type GradientStruct = {
   spreadMode: number; // UB[2]
@@ -407,8 +410,9 @@ const gradientDeserialiser = new DeserialiserFactory<GradientStruct>()
   .field("spreadMode", bytes(2))
   .field("interpolationMode", bytes(2))
   .field("numGradients", bytes(4))
-  .field("gradientRecords", (x) =>
-    array(gradientRecordDeserialiser, x.numGradients as number),
+  .field(
+    "gradientRecords",
+    (x) => array(gradientRecordDeserialiser, x.numGradients as number),
   )
   .build();
 
@@ -424,8 +428,9 @@ const focalGradientDeserialiser = new DeserialiserFactory<FocalGradientStruct>()
   .field("spreadMode", bytes(2))
   .field("interpolationMode", bytes(2))
   .field("numGradients", bytes(4))
-  .field("gradientRecords", (x) =>
-    array(gradientRecordDeserialiser, x.numGradients as number),
+  .field(
+    "gradientRecords",
+    (x) => array(gradientRecordDeserialiser, x.numGradients as number),
   )
   .field("focalPoint", u8()) // TODO: Fixed*
   .build();

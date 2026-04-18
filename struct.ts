@@ -16,16 +16,16 @@ interface Deserialisable {
 
 type FieldDefinition<FieldName> =
   | {
-      kind: "FIELD";
-      name: FieldName;
-      type: DataType | Resolver<DataType>;
-    }
+    kind: "FIELD";
+    name: FieldName;
+    type: DataType | Resolver<DataType>;
+  }
   | {
-      kind: "CONDITIONAL_FIELD";
-      predicate: Resolver<boolean>;
-      name: FieldName;
-      type: DataType | Resolver<DataType>;
-    };
+    kind: "CONDITIONAL_FIELD";
+    predicate: Resolver<boolean>;
+    name: FieldName;
+    type: DataType | Resolver<DataType>;
+  };
 // | {
 //     kind: "STRUCT_FIELD";
 //     name: FieldName;
@@ -40,27 +40,27 @@ type FieldDefinition<FieldName> =
 
 type DataType =
   | {
-      type: "BYTES";
-      width: number;
-    }
+    type: "BYTES";
+    width: number;
+  }
   | {
-      type: "U8";
-    }
+    type: "U8";
+  }
   | {
-      type: "U16";
-    }
+    type: "U16";
+  }
   | {
-      type: "U32";
-    }
+    type: "U32";
+  }
   | {
-      type: "STRUCT";
-      t: Deserialisable;
-    }
+    type: "STRUCT";
+    t: Deserialisable;
+  }
   | {
-      type: "ARRAY";
-      t: Deserialisable;
-      length?: number;
-    };
+    type: "ARRAY";
+    t: Deserialisable;
+    length?: number;
+  };
 
 export const bit = (): DataType => ({ type: "BYTES", width: 1 });
 export const bytes = (width: number): DataType => ({ type: "BYTES", width });

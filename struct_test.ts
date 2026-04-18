@@ -1,5 +1,5 @@
 import { Bitstream } from "./bitstream.ts";
-import { DeserialiserFactory, bit, u8, u16, array, struct } from "./struct.ts";
+import { array, bit, DeserialiserFactory, struct, u16, u8 } from "./struct.ts";
 import { assertEquals } from "https://deno.land/std@0.187.0/testing/asserts.ts";
 
 Deno.test("basic fields - bit", () => {
