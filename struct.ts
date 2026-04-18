@@ -91,7 +91,7 @@ export class Deserialiser<T extends Struct> implements Deserialisable {
       typeof d === "function" ? d({ parent, ...fields }, context) : d;
 
     const getData = (
-      d: DataType | Resolver<DataType>
+      d: DataType | Resolver<DataType>,
     ): number | Struct | Struct[] => {
       const t = resolveType(d);
 
@@ -108,7 +108,7 @@ export class Deserialiser<T extends Struct> implements Deserialisable {
         case "U16":
           return bs.readU16();
         case "U32":
-          return bs.readU16();
+          return bs.readU32();
         case "STRUCT":
           return t.t.deserialise(bs, context, parent);
         case "ARRAY": {
@@ -128,7 +128,12 @@ export class Deserialiser<T extends Struct> implements Deserialisable {
               out.push(s);
             } catch (error) {
               console.error(error);
-              if (error.message !== "end of buffer") throw error;
+              if (
+                !(error instanceof Error) ||
+                error.message !== "end of buffer"
+              ) {
+                throw error;
+              }
               return out;
             }
           }
@@ -180,7 +185,7 @@ export class DeserialiserFactory<T extends Struct> {
   conditionalField(
     p: Resolver<boolean>,
     name: keyof T,
-    type: DataType | Resolver<DataType>
+    type: DataType | Resolver<DataType>,
   ) {
     this.fieldDefinitions.push({
       kind: "CONDITIONAL_FIELD",
@@ -193,7 +198,7 @@ export class DeserialiserFactory<T extends Struct> {
 
   if(
     p: Resolver<boolean>,
-    f: (f: DeserialiserFactory<T>) => DeserialiserFactory<T>
+    f: (f: DeserialiserFactory<T>) => DeserialiserFactory<T>,
   ) {
     const fac = new DeserialiserFactory<T>();
     const d = f(fac).build();

@@ -5,7 +5,7 @@ export class Bitstream {
   constructor(buffer: Uint8Array) {
     this.buffer = buffer.reduce(
       (prev, n) => prev + n.toString(2).padStart(8, "0"),
-      ""
+      "",
     );
   }
 
@@ -47,12 +47,16 @@ export class Bitstream {
     return (h << 8) + l;
   }
 
-  readu32() {
+  readU32() {
     const a = this.read(8);
     const b = this.read(8);
     const c = this.read(8);
     const d = this.read(8);
-    return (a << 24) + (b << 16) + (c << 8) + d;
+    return a + (b << 8) + (c << 16) + (d << 24);
+  }
+
+  readu32() {
+    return this.readU32();
   }
 
   readSync(width: number): number {

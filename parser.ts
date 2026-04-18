@@ -1,4 +1,3 @@
-import "npm:reflect-metadata";
 import { Bitstream } from "./bitstream.ts";
 import {
   Deserialiser,
@@ -358,24 +357,24 @@ const matrixDeserialiser = new DeserialiserFactory<MatrixStruct>()
   .conditionalField(
     (x) => x.hasScale === 1,
     "scaleX",
-    (x) => bytes(x.nScaleBits as number)
+    (x) => bytes(x.nScaleBits as number),
   )
   .conditionalField(
     (x) => x.hasScale === 1,
     "scaleY",
-    (x) => bytes(x.nScaleBits as number)
+    (x) => bytes(x.nScaleBits as number),
   )
   .field("hasRotate", bit())
   .conditionalField((x) => x.hasRotate === 1, "nRotateBits", bytes(5))
   .conditionalField(
     (x) => x.hasRotate === 1,
     "rotateSkew0",
-    (x) => bytes(x.nRotateBits as number)
+    (x) => bytes(x.nRotateBits as number),
   )
   .conditionalField(
     (x) => x.hasRotate === 1,
     "rotateSkew1",
-    (x) => bytes(x.nRotateBits as number)
+    (x) => bytes(x.nRotateBits as number),
   )
   .field("nTranslateBits", bytes(5))
   .field("translateX", (x) => bytes(x.nTranslateBits as number))
@@ -393,7 +392,7 @@ const gradientRecordDeserialiser =
     .field("color", (_, ctx) =>
       ctx?.shapeType === "Shape3"
         ? struct(rgbaDeserialiser)
-        : struct(rgbDeserialiser)
+        : struct(rgbDeserialiser),
     )
     .build();
 
@@ -409,7 +408,7 @@ const gradientDeserialiser = new DeserialiserFactory<GradientStruct>()
   .field("interpolationMode", bytes(2))
   .field("numGradients", bytes(4))
   .field("gradientRecords", (x) =>
-    array(gradientRecordDeserialiser, x.numGradients as number)
+    array(gradientRecordDeserialiser, x.numGradients as number),
   )
   .build();
 
@@ -426,7 +425,7 @@ const focalGradientDeserialiser = new DeserialiserFactory<FocalGradientStruct>()
   .field("interpolationMode", bytes(2))
   .field("numGradients", bytes(4))
   .field("gradientRecords", (x) =>
-    array(gradientRecordDeserialiser, x.numGradients as number)
+    array(gradientRecordDeserialiser, x.numGradients as number),
   )
   .field("focalPoint", u8()) // TODO: Fixed*
   .build();
@@ -665,7 +664,7 @@ const readLittleEndian = (bitstream: Bitstream, length: number): number => {
 
 export const parseFillStyleArray = (
   bitstream: Bitstream,
-  shapeType: ShapeType
+  shapeType: ShapeType,
 ): FillStyle[] => {
   let itemCount = readLittleEndian(bitstream, 8);
 
@@ -724,7 +723,7 @@ export const parseFillStyleArray = (
 
 const parseLineStyleArray = (
   bitstream: Bitstream,
-  shapeType: ShapeType
+  shapeType: ShapeType,
 ): LineStyle[] => {
   let itemCount = bitstream.readSync(8);
 
@@ -780,7 +779,7 @@ const parseShapeRecord = (
   bitstream: Bitstream,
   shapeType: ShapeType,
   numFillBits: number,
-  numLineBits: number
+  numLineBits: number,
 ): ShapeRecord => {
   const isEdgeRecord = bitstream.readSync(1) === 1;
 
@@ -893,7 +892,7 @@ const parseShapeRecords = (
   reader: Bitstream,
   shapeType: ShapeType,
   numFillBits: number,
-  numLineBits: number
+  numLineBits: number,
 ): ShapeRecord[] => {
   console.log("\n*parseShapeRecords");
   const shapeRecords: ShapeRecord[] = [];
@@ -903,7 +902,7 @@ const parseShapeRecords = (
       reader,
       shapeType,
       numFillBits,
-      numLineBits
+      numLineBits,
     );
 
     shapeRecords.push(record);
@@ -915,7 +914,7 @@ const parseShapeRecords = (
 
 const parseShapeWithStyle = (
   bitstream: Bitstream,
-  shapeType: ShapeType
+  shapeType: ShapeType,
 ): ShapeWithStyle => {
   // FillStyles FILLSTYLEARRAY Array of fill styles.
   // LineStyles LINESTYLEARRAY Array of line styles.
@@ -950,7 +949,7 @@ const parseShapeWithStyle = (
     bitstream,
     shapeType,
     numFillBits,
-    numLineBits
+    numLineBits,
   );
 
   console.log("  /sr\n");
@@ -1018,384 +1017,16 @@ tagParsers[TagCode.DefineShape3] = (buffer) => {
   console.log({ id, bounds });
 
   console.log("\nsws");
-  console.log("-> bad data here 2");
-  // const shapes = parseShapeWithStyle(reader, "Shape3");
+  const shapes = parseShapeWithStyle(reader, "Shape3");
 
   console.log("/sws\n");
-
-  type FillStyleStruct = {
-    // UI8
-    fillStyleType: number;
-    // If type = 0x00, RGBA (if Shape3);
-    // RGB (if Shape1 or Shape2)
-    color: RGBStruct | RGBAStruct;
-    // If type = 0x10, 0x12, or 0x13, MATRIX
-    gradientMatrix: MatrixStruct;
-    // If type = 0x10 or 0x12, GRADIENT
-    // If type = 0x13, FOCALGRADIENT
-    gradient: GradientStruct | FocalGradientStruct;
-    // If type = 0x40, 0x41, 0x42 or 0x43, UI16
-    bitmapId: number;
-    // If type = 0x40, 0x41, 0x42 or 0x43, MATRIX
-    bitmapMatrix: MatrixStruct;
-  };
-
-  const fillStyleDeserialiser = new DeserialiserFactory<FillStyleStruct>()
-    .field("fillStyleType", u8())
-    .field("color", (x) =>
-      x.fillStyleType === 0 ? struct(rgbaDeserialiser) : struct(rgbDeserialiser)
-    )
-    .conditionalField(
-      (x) =>
-        x.fillStyleType === 0x10 ||
-        x.fillStyleType === 0x12 ||
-        x.fillStyleType === 0x13,
-      "gradientMatrix",
-      struct(matrixDeserialiser)
-    )
-    .conditionalField(
-      (x) => x.fillStyleType === 0x10 || x.fillStyleType == 0x12,
-      "gradient",
-      struct(gradientDeserialiser)
-    )
-    .conditionalField(
-      (x) => x.fillStyleType === 0x103,
-      "gradient",
-      struct(focalGradientDeserialiser)
-    )
-    .conditionalField(
-      (x) =>
-        x.fillStyleType === 0x40 ||
-        x.fillStyleType == 0x41 ||
-        x.fillStyleType == 0x42 ||
-        x.fillStyleType == 0x43,
-      "bitmapId",
-      u16()
-    )
-    .conditionalField(
-      (x) =>
-        x.fillStyleType === 0x40 ||
-        x.fillStyleType == 0x41 ||
-        x.fillStyleType == 0x42 ||
-        x.fillStyleType == 0x43,
-      "bitmapMatrix",
-      struct(matrixDeserialiser)
-    )
-    .build();
-
-  type FillStyleArrayStruct = {
-    fillStyleCount: number; // UI8
-    fillStyleCountExtended: number; // If FillStyleCount = 0xFF, UI16
-    fillStyles: FillStyleStruct[]; // FILLSTYLE[FillStyleCount]
-  };
-
-  const fillStyleArrayDeserialiser =
-    new DeserialiserFactory<FillStyleArrayStruct>()
-      .field("fillStyleCount", u8())
-      .conditionalField(
-        (x) => x.fillStyleCount == 0xff,
-        "fillStyleCountExtended",
-        u16()
-      )
-      .field("fillStyles", (x) =>
-        array(
-          fillStyleDeserialiser,
-          (x.fillStyleCountExtended !== undefined
-            ? x.fillStyleCountExtended
-            : x.fillStyleCount) as number
-        )
-      )
-      .build();
-
-  type LineStyleStruct = {
-    width: number; // UI16
-    startCapStyle: number; // UB[2]
-    joinStyle: number; // UB[2]
-    hasFillFlag: number; // UB[1]
-    noHScaleFlag: number; // UB[1]
-    noVScaleFlag: number; // UB[1]
-    pixelHintingFlag: number; // UB[1]
-    reserved: number; // UB[5]
-    noClose: number; // UB[1]
-    endCapStyle: number; // UB[2]
-    miterLimitFactor: number; // If JoinStyle = 2, UI16
-    color: RGBAStruct; // If HasFillFlag = 0, RGBA
-    fillType: FillStyleStruct; // If HasFillFlag = 1, FILLSTYLE
-  };
-
-  const lineStyleDeserialiser = new DeserialiserFactory<LineStyleStruct>()
-    .field("width", u16())
-    .field("startCapStyle", bytes(2))
-    .field("joinStyle", bytes(2))
-    .field("hasFillFlag", bit())
-    .field("noHScaleFlag", bit())
-    .field("noVScaleFlag", bit())
-    .field("pixelHintingFlag", bit())
-    .field("reserved", bytes(5))
-    .field("noClose", bit())
-    .field("endCapStyle", bytes(2))
-    .conditionalField((x) => x.joinStyle === 2, "miterLimitFactor", u16())
-    .conditionalField(
-      (x) => x.hasFillFlag === 2,
-      "color",
-      struct(rgbaDeserialiser)
-    )
-    .conditionalField(
-      (x) => x.hasFillFlag === 1,
-      "fillType",
-      struct(fillStyleDeserialiser)
-    )
-    .build();
-
-  type LineStyleArrayStruct = {
-    lineStyleCount: number; // UI8
-    lineStyleCountExtended: number; // If LineStyleCount = 0xFF, UI16 E
-    // If Shape1, Shape2, or Shape3, LINESTYLE[count].
-    // If Shape4 LINESTYLE2[count]
-    lineStyles: LineStyleStruct[];
-  };
-
-  type ParseShapeContext = {
-    shapeType: ShapeType;
-  };
-
-  const context: ParseShapeContext = { shapeType: "Shape3" };
-
-  const lineStyleArrayDeserialiser =
-    new DeserialiserFactory<LineStyleArrayStruct>()
-      .field("lineStyleCount", u8())
-      .conditionalField(
-        (x) => x.fillStyleCount == 0xff,
-        "lineStyleCountExtended",
-        u16()
-      )
-      .conditionalField(
-        (_, ctx) => (ctx?.shapeType === "Shape4" ? TODO() : true),
-        "lineStyles",
-        (x) =>
-          array(
-            lineStyleDeserialiser,
-            (x.lineStyleCountExtended !== undefined
-              ? x.lineStyleCountExtended
-              : x.lineStyleCount) as number
-          )
-      )
-      .build();
-
-  enum ShapeRecordType {
-    NonEdge = 0,
-    Edge = 1,
-  }
-
-  type ShapeRecordStruct = {
-    typeFlag: ShapeRecordType; // UB[1]
-    flags: number; // UB[5]
-    data:
-      | EndShapeRecordDataStruct
-      | StyleChangeRecordDataStruct
-      | StraightEdgeRecordDataStruct
-      | CurvedEdgeRecordDataStruct;
-  };
-
-  type EndShapeRecordDataStruct = Struct;
-  const endShapeRecordDataDeserialiser =
-    new DeserialiserFactory<EndShapeRecordDataStruct>().build();
-
-  type StyleChangeRecordFlagsStruct = {
-    stateNewStyles: number; // UB[1]
-    stateLineStyle: number; // UB[1]
-    stateFillStyle1: number; // UB[1]
-    stateFillStyle0: number; // UB[1]
-    stateMoveTo: number; // UB[1]
-  };
-
-  type StyleChangeRecordDataStruct = {
-    // If StateMoveTo
-    moveBits: number; // UB[5]
-    moveDeltaX: number; // SB[MoveBits]
-    moveDeltaY: number; // SB[MoveBits]
-    //
-    // If StateFillStyle0
-    fillStyle0: number; // UB[FillBits]
-    fillStyle1: number; //  UB[FillBits]
-    //
-    // If StateLineStyle
-    lineStyle: number; // UB[LineBits]
-    // If StateNewStyles
-    fillStyles: FillStyleArrayStruct;
-    lineStyles: LineStyleArrayStruct;
-    numFillBits: number; // UB[4]
-    numLineBits: number; // UB[4]
-    //
-  };
-  const styleChangeShapeRecordDataDeserialiser =
-    new DeserialiserFactory<StyleChangeRecordDataStruct>()
-      .if(
-        (_, ctx) => ctx?.stateMoveTo === 1,
-        (f) =>
-          f
-            .field("moveDeltaX", (x) => bytes(x.moveBits as number))
-            .field("moveDeltaY", (x) => bytes(x.moveBits as number))
-      )
-      .if(
-        (_, ctx) => ctx?.stateFillStyle0 === 1,
-        (f) =>
-          f
-            .field("fillStyle0", (_, ctx) => bytes(ctx?.numFillBits as number))
-            .field("fillStyle1", (_, ctx) => bytes(ctx?.numFillBits as number))
-      )
-      .if(
-        (_, ctx) => ctx?.stateLineStyle === 1,
-        (f) =>
-          f.field("lineStyle", (_, ctx) => bytes(ctx?.numLineBits as number))
-      )
-      .if(
-        (_, ctx) => ctx?.stateNewStyles === 1,
-        (f) =>
-          f
-            .field("fillStyles", fillStyleArrayDeserialiser.type())
-            .field("fillStyles", lineStyleArrayDeserialiser.type())
-            .field("numFillBits", bytes(4))
-            .field("numLineBits", bytes(4))
-      )
-      .build();
-
-  type StraightEdgeRecordDataStruct = {
-    generalLineFlag: number; // UB[1]
-    vertLineFlag: number; // If GeneralLineFlag = 0, SB[1]
-    deltaX: number; // If GeneralLineFlag = 1 or if VertLineFlag = 0, SB[NumBits+2]
-    deltaY: number; // If GeneralLineFlag = 1 or if VertLineFlag = 1, SB[NumBits+2]
-  };
-
-  const straightEdgeShapeRecordDataDeserialiser =
-    new DeserialiserFactory<StraightEdgeRecordDataStruct>()
-      .field("generalLineFlag", bit())
-      .conditionalField((x) => x.generalLineFlag === 0, "vertLineFlag", bit())
-      .conditionalField(
-        (x) => x.generalLineFlag === 1 || x.vertLineFlag === 0,
-        "deltaX",
-        (_, ctx) => bytes((ctx?.flags as number & 0b01111) + 2)
-      )
-      .conditionalField(
-        (x) => x.generalLineFlag === 1 || x.vertLineFlag === 1,
-        "deltaY",
-        (_, ctx) => bytes((ctx?.flags as number & 0b01111) + 2)
-      )
-      .build();
-
-  type CurvedEdgeRecordDataStruct = {
-    controlDeltaX: number; // SB[NumBits+2]
-    controlDeltaY: number; // SB[NumBits+2]
-    anchorDeltaX: number; // SB[NumBits+2]
-    anchorDeltaY: number; // SB[NumBits+2]
-  };
-
-  const curvedEdgeShapeRecordDataDeserialiser =
-    new DeserialiserFactory<CurvedEdgeRecordDataStruct>()
-      .field("controlDeltaX", (_, ctx) =>
-        bytes((ctx?.flags as number & 0b01111) + 2)
-      )
-      .field("controlDeltaY", (_, ctx) =>
-        bytes((ctx?.flags as number & 0b01111) + 2)
-      )
-      .field("anchorDeltaX", (_, ctx) =>
-        bytes((ctx?.flags as number & 0b01111) + 2)
-      )
-      .field("anchorDeltaY", (_, ctx) =>
-        bytes((ctx?.flags as number & 0b01111) + 2)
-      )
-      .build();
-
-  const isEndShapeRecord: Resolver<boolean> = (x) => {
-    const a = x.typeFlag === 0 && x.flags === 0;
-    console.log("isEndShapeRecord", a);
-    return a;
-  };
-
-  const isStyleChangeShapeRecord: Resolver<boolean> = (x) => {
-    const a = x.typeFlag === 0 && x.flags !== 0;
-    console.log("isStyleChangeShapeRecord", a);
-    return a;
-  };
-
-  const isStraightEdgeShapeRecord: Resolver<boolean> = (x) => {
-    const a = x.typeFlag === 1 && (x.flags as number & 0b10000) > 0;
-    console.log("isStraightEdgeShapeRecord", a);
-    return a;
-  };
-  const isCurvedEdgeShapeRecord: Resolver<boolean> = (x) => {
-    const a = x.typeFlag === 1 && (x.flags as number & 0b10000) <= 0;
-    console.log("isCurvedEdgeShapeRecord", a);
-    return a;
-  };
-
-  const shapeRecordDeserialiser = new DeserialiserFactory<ShapeRecordStruct>()
-    .field("typeFlag", bit())
-    .field("flags", bytes(5))
-    .conditionalField(
-      isEndShapeRecord,
-      "data",
-      endShapeRecordDataDeserialiser.type()
-    )
-    .conditionalField(
-      isStyleChangeShapeRecord,
-      "data",
-      styleChangeShapeRecordDataDeserialiser.type()
-    )
-    .conditionalField(
-      isStraightEdgeShapeRecord,
-      "data",
-      straightEdgeShapeRecordDataDeserialiser.type()
-    )
-    .conditionalField(
-      isCurvedEdgeShapeRecord,
-      "data",
-      curvedEdgeShapeRecordDataDeserialiser.type()
-    )
-    .build();
-
-  type ShapeWithStyleStruct = {
-    fillStyles: FillStyleArrayStruct; // FILLSTYLEARRAY
-    lineStyles: LineStyleArrayStruct; // LINESTYLEARRAY
-    numFillBits: number; // UB[4]
-    numLineBits: number; // UB[4]
-    shapeRecords: ShapeRecordStruct[]; // SHAPERECORD[one or more]
-  };
-
-  const shapeWithStyleDeserialiser =
-    new DeserialiserFactory<ShapeWithStyleStruct>()
-      .field("fillStyles", struct(fillStyleArrayDeserialiser))
-      .field("lineStyles", struct(lineStyleArrayDeserialiser))
-      .field("numFillBits", bytes(4))
-      .field("numLineBits", bytes(4))
-      .field("shapeRecords", array(shapeRecordDeserialiser))
-      .build();
 
   const tag: Tag = {
     type: "DefineShape3",
     id,
     bounds,
-    // shapes,
+    shapes,
   };
-
-  type DefineShapeStruct = {
-    shapeId: number;
-    shapeBounds: RectStruct;
-    shapes: ShapeWithStyleStruct;
-  };
-
-  const d = new DeserialiserFactory<DefineShapeStruct>()
-    .field("shapeId", u16())
-    .field("shapeBounds", struct(rectDeserialiser))
-    .field("shapes", struct(shapeWithStyleDeserialiser))
-    .build();
-
-  const s = d.deserialise(Bitstream.fromBuffer(buffer), context);
-  console.log({
-    s,
-    tag,
-  });
-  throw "!";
 
   return tag;
 };
@@ -1406,7 +1037,7 @@ const TODO_PARSER = (name: string) => (_: Uint8Array) => {
 };
 
 tagParsers[TagCode.DefineSceneAndFrameLabelData] = TODO_PARSER(
-  "DefineSceneAndFrameLabelData"
+  "DefineSceneAndFrameLabelData",
 );
 tagParsers[TagCode.DefineFont3] = TODO_PARSER("DefineFont3");
 tagParsers[TagCode.DefineFontAlignZones] = TODO_PARSER("DefineFontAlignZones");
@@ -1417,7 +1048,7 @@ tagParsers[TagCode.DefineSprite] = TODO_PARSER("DefineSprite");
 
 const parseTag = (
   buffer: Uint8Array,
-  startIndex: number
+  startIndex: number,
 ): { tag: Tag; nextTagStartIndex: number } => {
   if (startIndex + 2 > buffer.length) {
     return { tag: null as unknown as Tag, nextTagStartIndex: buffer.length };
@@ -1426,7 +1057,7 @@ const parseTag = (
   console.log(`--- parseTag --- index: ${startIndex}`, startIndex);
 
   const tagCodeAndLength = new Uint16Array(
-    buffer.slice(startIndex, startIndex + 2).buffer
+    buffer.slice(startIndex, startIndex + 2).buffer,
   )[0];
 
   // tag code is first 10 bits
@@ -1450,7 +1081,7 @@ const parseTag = (
   // then this field has all 1s and the length is indicated in the following dword
   if (length > 62) {
     const dv = new DataView(
-      buffer.slice(startIndex + 2, startIndex + 6).reverse().buffer
+      buffer.slice(startIndex + 2, startIndex + 6).reverse().buffer,
     );
     length = dv.getUint32(0);
     attributesStartIndex = startIndex + 6;
@@ -1458,7 +1089,7 @@ const parseTag = (
 
   const bodyBuffer = buffer.slice(
     attributesStartIndex,
-    attributesStartIndex + length
+    attributesStartIndex + length,
   );
 
   const parseTag = tagParsers[tagCode];
@@ -1502,7 +1133,7 @@ export const parseTags = (buffer: Uint8Array): Tag[] => {
     index = nextTagStartIndex;
   }
 
-  return [];
+  return tags;
 };
 
 // ITEM TYPES

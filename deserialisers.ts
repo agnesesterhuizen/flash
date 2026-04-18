@@ -26,6 +26,7 @@ export type HeaderStruct = {
   version: number; // UI8
   fileLength: number; // UI32
   frameSize: RectStruct;
+  frameSizePadding: number;
   frameRate: number; // UI16
   frameCount: number; // UI16
 };
@@ -37,6 +38,11 @@ export const headerDeserialiser = new DeserialiserFactory<HeaderStruct>()
   .field("version", u8())
   .field("fileLength", u32())
   .field("frameSize", rectDeserialiser.type())
+  .field("frameSizePadding", (x) =>
+    bytes(
+      (8 - ((5 + ((x.frameSize as RectStruct).nBits as number) * 4) % 8)) % 8,
+    ),
+  )
   .field("frameRate", u16())
   .field("frameCount", u16())
   .build();

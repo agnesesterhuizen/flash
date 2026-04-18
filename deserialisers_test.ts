@@ -16,8 +16,10 @@ import { Bitstream } from "./bitstream.ts";
 // });
 
 Deno.test("headerDeserialiser", () => {
-  const arrayBuffer = Deno.readFileSync("test-data/DefineShape3.swf");
-  const buffer = new Uint8Array(arrayBuffer);
+  const buffer = new Uint8Array([
+    0x46, 0x57, 0x53, 0x20, 0x91, 0x00, 0x00, 0x00, 0x78, 0x00, 0x05, 0x5f,
+    0x00, 0x00, 0x0f, 0xa0, 0x00, 0x18, 0x00, 0x01, 0x00,
+  ]);
 
   const s = headerDeserialiser.deserialise(Bitstream.fromBuffer(buffer));
 
@@ -27,10 +29,10 @@ Deno.test("headerDeserialiser", () => {
   assertEquals(32, s.version);
   assertEquals(145, s.fileLength);
   assertEquals(15, s.frameSize.nBits);
-  //   assertEquals(0, s.frameSize.xMin);
-  //   assertEquals(11000, s.frameSize.xMax);
-  //   assertEquals(0, s.frameSize.yMin);
-  //   assertEquals(8000, s.frameSize.yMax);
-  //   assertEquals(24, s.frameRate);
-  //   assertEquals(1, s.frameCount);
+  assertEquals(0, s.frameSize.xMin);
+  assertEquals(11000, s.frameSize.xMax);
+  assertEquals(0, s.frameSize.yMin);
+  assertEquals(8000, s.frameSize.yMax);
+  assertEquals(24, s.frameRate);
+  assertEquals(1, s.frameCount);
 });
