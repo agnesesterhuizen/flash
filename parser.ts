@@ -13,6 +13,22 @@ import {
 } from "./struct.ts";
 import { rectDeserialiser } from "./deserialisers.ts";
 
+const isParserDebugEnabled = () =>
+  (globalThis as typeof globalThis & { __SWF_PARSER_DEBUG__?: boolean })
+    .__SWF_PARSER_DEBUG__ === true;
+
+const parserDebugLog = (
+  scope: string,
+  message: string,
+  details?: Record<string, unknown>,
+) => {
+  if (!isParserDebugEnabled()) {
+    return;
+  }
+
+  console.log(`[parser:${scope}] ${message}`, details ?? {});
+};
+
 const TagCode = {
   End: 0,
   ShowFrame: 1,
@@ -661,13 +677,30 @@ export const parseFillStyleArray = (
   bitstream: Bitstream,
   shapeType: ShapeType,
 ): FillStyle[] => {
+  const startIndex = bitstream.index;
   let itemCount = readLittleEndian(bitstream, 8);
 
   if (itemCount === 0xff) {
     itemCount = readLittleEndian(bitstream, 16);
   }
 
+  parserDebugLog("fillStyles", "read fill style count", {
+    shapeType,
+    startIndex,
+    afterCountIndex: bitstream.index,
+    itemCount,
+  });
+
   const fillStyles: FillStyle[] = [];
+
+  if (itemCount > 0) {
+    parserDebugLog("fillStyles", "returning early without consuming styles", {
+      shapeType,
+      itemCount,
+      currentIndex: bitstream.index,
+      available: bitstream.available,
+    });
+  }
 
   return fillStyles;
 
@@ -718,11 +751,19 @@ const parseLineStyleArray = (
   bitstream: Bitstream,
   shapeType: ShapeType,
 ): LineStyle[] => {
+  const startIndex = bitstream.index;
   let itemCount = bitstream.readSync(8);
 
   if (itemCount === 0xff) {
     itemCount = bitstream.readSync(16);
   }
+
+  parserDebugLog("lineStyles", "read line style count", {
+    shapeType,
+    startIndex,
+    afterCountIndex: bitstream.index,
+    itemCount,
+  });
 
   const lineStyles: LineStyle[] = [];
 
@@ -731,6 +772,13 @@ const parseLineStyleArray = (
   }
 
   while (lineStyles.length < itemCount) {
+    parserDebugLog("lineStyles", "reading line style", {
+      shapeType,
+      lineStyleIndex: lineStyles.length,
+      currentIndex: bitstream.index,
+      available: bitstream.available,
+    });
+
     const width = bitstream.readSync(16);
     const isRGBA = shapeType === "Shape3";
     const colorBytes = isRGBA ? 4 : 3;
@@ -774,11 +822,24 @@ const parseShapeRecord = (
   numFillBits: number,
   numLineBits: number,
 ): ShapeRecord => {
+  const recordStartIndex = bitstream.index;
   const isEdgeRecord = bitstream.readSync(1) === 1;
+
+  parserDebugLog("shapeRecord", "record start", {
+    shapeType,
+    recordStartIndex,
+    isEdgeRecord,
+    numFillBits,
+    numLineBits,
+    available: bitstream.available,
+  });
 
   if (!isEdgeRecord) {
     const isEndOfShape = bitstream.readSync(5) === 0;
     if (isEndOfShape) {
+      parserDebugLog("shapeRecord", "end shape record", {
+        currentIndex: bitstream.index,
+      });
       return { type: "EndShape" };
     }
 
@@ -795,6 +856,16 @@ const parseShapeRecord = (
       stateFillStyle0,
       stateMoveTo,
     } = getShapeRecordFlags(flags);
+
+    parserDebugLog("shapeRecord", "style change flags", {
+      currentIndex: bitstream.index,
+      flags,
+      stateNewStyles,
+      stateLineStyle,
+      stateFillStyle1,
+      stateFillStyle0,
+      stateMoveTo,
+    });
 
     if (stateMoveTo) {
       // 130
@@ -817,11 +888,24 @@ const parseShapeRecord = (
     }
 
     if (stateNewStyles) {
+      parserDebugLog("shapeRecord", "parsing new styles", {
+        currentIndex: bitstream.index,
+        available: bitstream.available,
+      });
+
       const fillStyles = parseFillStyleArray(bitstream, shapeType);
       const lineStyles = parseLineStyleArray(bitstream, shapeType);
 
       const numFillBits = bitstream.readSync(4);
       const numLineBits = bitstream.readSync(4);
+
+      parserDebugLog("shapeRecord", "parsed new styles", {
+        currentIndex: bitstream.index,
+        fillStyleCount: fillStyles.length,
+        lineStyleCount: lineStyles.length,
+        numFillBits,
+        numLineBits,
+      });
 
       record.newStyles = { fillStyles, lineStyles };
     }
@@ -883,6 +967,14 @@ const parseShapeRecords = (
 ): ShapeRecord[] => {
   const shapeRecords: ShapeRecord[] = [];
 
+  parserDebugLog("shapeRecords", "start parsing shape records", {
+    shapeType,
+    currentIndex: reader.index,
+    available: reader.available,
+    numFillBits,
+    numLineBits,
+  });
+
   while (reader.available > 0) {
     const record = parseShapeRecord(
       reader,
@@ -892,6 +984,18 @@ const parseShapeRecords = (
     );
 
     shapeRecords.push(record);
+
+    parserDebugLog("shapeRecords", "parsed shape record", {
+      shapeType,
+      currentIndex: reader.index,
+      available: reader.available,
+      recordType: record.type,
+      recordCount: shapeRecords.length,
+    });
+
+    if (record.type === "EndShape") {
+      break;
+    }
     continue;
   }
 
@@ -908,12 +1012,27 @@ const parseShapeWithStyle = (
   // NumLineBits UB[4] Number of line index bits.
   // ShapeRecords SHAPERECORD[one or more] Shape records
 
+  parserDebugLog("shapeWithStyle", "start", {
+    shapeType,
+    currentIndex: bitstream.index,
+    available: bitstream.available,
+  });
+
   const fillStyles = parseFillStyleArray(bitstream, shapeType);
 
   const lineStyles = parseLineStyleArray(bitstream, shapeType);
 
   const numFillBits = bitstream.readSync(4);
   const numLineBits = bitstream.readSync(4);
+
+  parserDebugLog("shapeWithStyle", "parsed style arrays", {
+    shapeType,
+    currentIndex: bitstream.index,
+    fillStyleCount: fillStyles.length,
+    lineStyleCount: lineStyles.length,
+    numFillBits,
+    numLineBits,
+  });
 
   const shapeRecords = parseShapeRecords(
     bitstream,
@@ -1033,6 +1152,14 @@ const parseTag = (
     length = dv.getUint32(0);
     attributesStartIndex = startIndex + 6;
   }
+
+  parserDebugLog("tag", "dispatch", {
+    startIndex,
+    tagCode,
+    tagType: TagTypeNames[tagCode] || tagCode,
+    length,
+    attributesStartIndex,
+  });
 
   const bodyBuffer = buffer.slice(
     attributesStartIndex,
