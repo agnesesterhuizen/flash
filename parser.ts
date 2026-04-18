@@ -246,19 +246,19 @@ const FillStyleCodeNames: Record<number, FillStyleType> = {
 
 type FillStyle<ColorType = RGB> =
   | {
-    type: SolidFillStyleType;
-    color: ColorType;
-  }
+      type: SolidFillStyleType;
+      color: ColorType;
+    }
   | {
-    type: BitmapFillStyleType;
-    gradientMatrix: Matrix;
-    gradient: Gradient;
-  }
+      type: BitmapFillStyleType;
+      gradientMatrix: Matrix;
+      gradient: Gradient;
+    }
   | {
-    type: BitmapFillStyleType;
-    bitmapId: number;
-    bitmapMatrix: Matrix;
-  };
+      type: BitmapFillStyleType;
+      bitmapId: number;
+      bitmapMatrix: Matrix;
+    };
 
 interface LineStyle<ColorType = RGB> {
   width: number;
@@ -290,34 +290,34 @@ type ShapeRecordType =
 
 type ShapeRecord =
   | {
-    type: "EndShape";
-  }
+      type: "EndShape";
+    }
   | {
-    type: "StyleChange";
-    moveTo?: { deltaX: number; deltaY: number };
-    fillStyle0?: number;
-    fillStyle1?: number;
-    lineStyle?: number;
-    newStyles?: {
-      fillStyles: FillStyle[];
-      lineStyles: LineStyle[];
-      numFillBits: number;
-      numLineBits: number;
+      type: "StyleChange";
+      moveTo?: { deltaX: number; deltaY: number };
+      fillStyle0?: number;
+      fillStyle1?: number;
+      lineStyle?: number;
+      newStyles?: {
+        fillStyles: FillStyle[];
+        lineStyles: LineStyle[];
+        numFillBits: number;
+        numLineBits: number;
+      };
+    }
+  | {
+      type: "StraightEdge";
+      lineType: "General" | "Horizontal" | "Vertical";
+      deltaX: number;
+      deltaY: number;
+    }
+  | {
+      type: "CurvedEdge";
+      controlDeltaX: number;
+      controlDeltaY: number;
+      anchorDeltaX: number;
+      anchorDeltaY: number;
     };
-  }
-  | {
-    type: "StraightEdge";
-    lineType: "General" | "Horizontal" | "Vertical";
-    deltaX: number;
-    deltaY: number;
-  }
-  | {
-    type: "CurvedEdge";
-    controlDeltaX: number;
-    controlDeltaY: number;
-    anchorDeltaX: number;
-    anchorDeltaY: number;
-  };
 
 interface ShapeWithStyle {
   fillStyles: FillStyle[];
@@ -329,99 +329,99 @@ interface ShapeWithStyle {
 
 type Tag =
   | {
-    type: "SetBackgroundColor";
-    color: RGB;
-  }
+      type: "SetBackgroundColor";
+      color: RGB;
+    }
   | {
-    type: "FileAttributes";
-    useDirectBlit: boolean;
-    useGPU: boolean;
-    hasMetadata: boolean;
-    actionScript3: boolean;
-    useNetwork: boolean;
-  }
+      type: "FileAttributes";
+      useDirectBlit: boolean;
+      useGPU: boolean;
+      hasMetadata: boolean;
+      actionScript3: boolean;
+      useNetwork: boolean;
+    }
   | {
-    type: "DefineSceneAndFrameLabelData";
-    sceneCount: number;
-    scenes: Scene[];
-    frames: Frame[];
-  }
+      type: "DefineSceneAndFrameLabelData";
+      sceneCount: number;
+      scenes: Scene[];
+      frames: Frame[];
+    }
   | {
-    type: "DefineShape";
-    id: number;
-    bounds: Rect;
-    shapes: ShapeWithStyle;
-  }
+      type: "DefineShape";
+      id: number;
+      bounds: Rect;
+      shapes: ShapeWithStyle;
+    }
   | {
-    type: "DefineShape2";
-    id: number;
-    bounds: Rect;
-    shapes: ShapeWithStyle;
-  }
+      type: "DefineShape2";
+      id: number;
+      bounds: Rect;
+      shapes: ShapeWithStyle;
+    }
   | {
-    type: "DefineShape3";
-    id: number;
-    bounds: Rect;
-    shapes: ShapeWithStyle;
-  }
+      type: "DefineShape3";
+      id: number;
+      bounds: Rect;
+      shapes: ShapeWithStyle;
+    }
   | {
-    type: "DefineShape4";
-    id: number;
-    bounds: Rect;
-    edgeBounds: Rect;
-    usesFillWindingRule: boolean;
-    usesNonScalingStrokes: boolean;
-    usesScalingStrokes: boolean;
-    shapes: ShapeWithStyle;
-  }
+      type: "DefineShape4";
+      id: number;
+      bounds: Rect;
+      edgeBounds: Rect;
+      usesFillWindingRule: boolean;
+      usesNonScalingStrokes: boolean;
+      usesScalingStrokes: boolean;
+      shapes: ShapeWithStyle;
+    }
   | {
-    type: "DefineBitsLossless2";
-    characterId: number;
-    bitmapFormat: number;
-    bitmapWidth: number;
-    bitmapHeight: number;
-    bitmapColorTableSize?: number;
-    zlibBitmapData: Uint8Array;
-  }
+      type: "DefineBitsLossless2";
+      characterId: number;
+      bitmapFormat: number;
+      bitmapWidth: number;
+      bitmapHeight: number;
+      bitmapColorTableSize?: number;
+      zlibBitmapData: Uint8Array;
+    }
   | {
-    type: "DefineBitsLossless";
-    characterId: number;
-    bitmapFormat: number;
-    bitmapWidth: number;
-    bitmapHeight: number;
-    bitmapColorTableSize?: number;
-    zlibBitmapData: Uint8Array;
-  }
+      type: "DefineBitsLossless";
+      characterId: number;
+      bitmapFormat: number;
+      bitmapWidth: number;
+      bitmapHeight: number;
+      bitmapColorTableSize?: number;
+      zlibBitmapData: Uint8Array;
+    }
   | {
-    type: "PlaceObject2";
-    hasClipActions: boolean;
-    hasClipDepth: boolean;
-    hasName: boolean;
-    hasRatio: boolean;
-    hasColorTransform: boolean;
-    hasMatrix: boolean;
-    hasCharacter: boolean;
-    move: boolean;
-    depth: number;
-    characterId?: number;
-    matrix?: Matrix;
-    ratio?: number;
-    name?: string;
-    clipDepth?: number;
-  }
+      type: "PlaceObject2";
+      hasClipActions: boolean;
+      hasClipDepth: boolean;
+      hasName: boolean;
+      hasRatio: boolean;
+      hasColorTransform: boolean;
+      hasMatrix: boolean;
+      hasCharacter: boolean;
+      move: boolean;
+      depth: number;
+      characterId?: number;
+      matrix?: Matrix;
+      ratio?: number;
+      name?: string;
+      clipDepth?: number;
+    }
   | {
-    type: "DoABC";
-    flags: number;
-    name: string;
-    abcData: Uint8Array;
-  }
+      type: "DoABC";
+      flags: number;
+      name: string;
+      abcData: Uint8Array;
+    }
   | {
-    type: "SymbolClass";
-    symbols: { tag: number; name: string }[];
-  }
+      type: "SymbolClass";
+      symbols: { tag: number; name: string }[];
+    }
   | {
-    type: "ShowFrame";
-  };
+      type: "ShowFrame";
+    };
 
 const RECT_SIZE = 9;
 
@@ -527,18 +527,15 @@ type GradientRecordStuct = {
   color: RGBStruct | RGBAStruct; // RGB (Shape1 or Shape2) RGBA (Shape3)
 };
 
-const gradientRecordDeserialiser = new DeserialiserFactory<
-  GradientRecordStuct
->()
-  .field("ratio", u8())
-  .field(
-    "color",
-    (_, ctx) =>
+const gradientRecordDeserialiser =
+  new DeserialiserFactory<GradientRecordStuct>()
+    .field("ratio", u8())
+    .field("color", (_, ctx) =>
       ctx?.shapeType === "Shape3"
         ? struct(rgbaDeserialiser)
         : struct(rgbDeserialiser),
-  )
-  .build();
+    )
+    .build();
 
 type GradientStruct = {
   spreadMode: number; // UB[2]
@@ -551,9 +548,8 @@ const gradientDeserialiser = new DeserialiserFactory<GradientStruct>()
   .field("spreadMode", bytes(2))
   .field("interpolationMode", bytes(2))
   .field("numGradients", bytes(4))
-  .field(
-    "gradientRecords",
-    (x) => array(gradientRecordDeserialiser, x.numGradients as number),
+  .field("gradientRecords", (x) =>
+    array(gradientRecordDeserialiser, x.numGradients as number),
   )
   .build();
 
@@ -569,9 +565,8 @@ const focalGradientDeserialiser = new DeserialiserFactory<FocalGradientStruct>()
   .field("spreadMode", bytes(2))
   .field("interpolationMode", bytes(2))
   .field("numGradients", bytes(4))
-  .field(
-    "gradientRecords",
-    (x) => array(gradientRecordDeserialiser, x.numGradients as number),
+  .field("gradientRecords", (x) =>
+    array(gradientRecordDeserialiser, x.numGradients as number),
   )
   .field("focalPoint", u8()) // TODO: Fixed*
   .build();
@@ -905,9 +900,8 @@ const parseLineStyleArray = (
       bitstream.readSync(5);
       const noClose = bitstream.readSync(1) === 1;
       const endCapStyle = bitstream.readSync(2);
-      const miterLimitFactor = joinStyle === 2
-        ? bitstream.readU16()
-        : undefined;
+      const miterLimitFactor =
+        joinStyle === 2 ? bitstream.readU16() : undefined;
 
       const lineStyle: LineStyle2<RGBA> = {
         width,
@@ -1307,7 +1301,11 @@ tagParsers[TagCode.DefineShape4] = (buffer) => {
   } satisfies Tag;
 };
 
-tagParsers[TagCode.DefineBitsLossless2] = (buffer) => {
+const parseDefineBitsLossless = (
+  tagType: "DefineBitsLossless" | "DefineBitsLossless2",
+  validNonPaletteFormats: number[],
+  buffer: Uint8Array,
+): Tag => {
   const characterId = readU16LE(buffer, 0);
   const bitmapFormat = buffer[2];
   const bitmapWidth = readU16LE(buffer, 3);
@@ -1319,14 +1317,14 @@ tagParsers[TagCode.DefineBitsLossless2] = (buffer) => {
   if (bitmapFormat === 3) {
     bitmapColorTableSize = buffer[index];
     index += 1;
-  } else if (bitmapFormat !== 5) {
-    throw `DefineBitsLossless2: unsupported bitmap format ${bitmapFormat}`;
+  } else if (!validNonPaletteFormats.includes(bitmapFormat)) {
+    throw `${tagType}: unsupported bitmap format ${bitmapFormat}`;
   }
 
   const zlibBitmapData = buffer.slice(index);
 
   return {
-    type: "DefineBitsLossless2",
+    type: tagType,
     characterId,
     bitmapFormat,
     bitmapWidth,
@@ -1336,34 +1334,11 @@ tagParsers[TagCode.DefineBitsLossless2] = (buffer) => {
   } satisfies Tag;
 };
 
-tagParsers[TagCode.DefineBitsLossless] = (buffer) => {
-  const characterId = readU16LE(buffer, 0);
-  const bitmapFormat = buffer[2];
-  const bitmapWidth = readU16LE(buffer, 3);
-  const bitmapHeight = readU16LE(buffer, 5);
+tagParsers[TagCode.DefineBitsLossless2] = (buffer) =>
+  parseDefineBitsLossless("DefineBitsLossless2", [5], buffer);
 
-  let index = 7;
-  let bitmapColorTableSize: number | undefined;
-
-  if (bitmapFormat === 3) {
-    bitmapColorTableSize = buffer[index];
-    index += 1;
-  } else if (bitmapFormat !== 4 && bitmapFormat !== 5) {
-    throw `DefineBitsLossless: unsupported bitmap format ${bitmapFormat}`;
-  }
-
-  const zlibBitmapData = buffer.slice(index);
-
-  return {
-    type: "DefineBitsLossless",
-    characterId,
-    bitmapFormat,
-    bitmapWidth,
-    bitmapHeight,
-    bitmapColorTableSize,
-    zlibBitmapData,
-  } satisfies Tag;
-};
+tagParsers[TagCode.DefineBitsLossless] = (buffer) =>
+  parseDefineBitsLossless("DefineBitsLossless", [4, 5], buffer);
 
 tagParsers[TagCode.PlaceObject2] = (buffer) => {
   const reader = Bitstream.fromBuffer(buffer);
