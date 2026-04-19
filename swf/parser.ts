@@ -1,6 +1,7 @@
 import { Bitstream } from "./bitstream.ts";
 import { bit, bytes, DeserialiserFactory, sbytes, u8 } from "./struct.ts";
 import { rectDeserialiser } from "./deserialisers.ts";
+import { AbcFile, Decompiler } from "../avm/decompiler.ts";
 
 const isParserDebugEnabled = () =>
   (globalThis as typeof globalThis & { __SWF_PARSER_DEBUG__?: boolean })
@@ -447,7 +448,8 @@ type Tag =
       type: "DoABC";
       flags: number;
       name: string;
-      abcData: Uint8Array;
+      abcDataRaw: Uint8Array;
+      abcData: AbcFile;
     }
   | {
       type: "SymbolClass";
@@ -1549,12 +1551,16 @@ tagParsers[TagCode.DoABC] = (buffer) => {
   const reader = Bitstream.fromBuffer(buffer.slice(4));
   const name = parseNullTerminatedString(reader);
   const abcByteOffset = 4 + reader.index / 8;
-  const abcData = buffer.slice(abcByteOffset);
+  const abcDataRaw = buffer.slice(abcByteOffset);
+
+  const avmDecompiler = new Decompiler();
+  const abcData = avmDecompiler.run(Array.from(abcDataRaw));
 
   return {
     type: "DoABC",
     flags,
     name,
+    abcDataRaw,
     abcData,
   } satisfies Tag;
 };
