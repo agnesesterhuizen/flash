@@ -1,19 +1,27 @@
-import { parseHeader, parseTags } from "./parser.ts";
+import { Decompiler } from "./avm/decompiler.ts";
+import { parseHeader, parseTags } from "./swf/parser.ts";
 
 (
   globalThis as typeof globalThis & { __SWF_PARSER_DEBUG__?: boolean }
 ).__SWF_PARSER_DEBUG__ = false;
 
-const arrayBuffer = await Deno.readFile("prm.swf");
-const buffer = new Uint8Array(arrayBuffer);
+const bcjson = Deno.readTextFileSync("./abddata.json");
+const bc = Object.values(JSON.parse(bcjson)) as number[];
 
-const header = parseHeader(buffer);
+// const arrayBuffer = await Deno.readFile("prm.swf");
+// const buffer = new Uint8Array(arrayBuffer);
 
-const tags = parseTags(buffer.slice(21));
+// const header = parseHeader(buffer);
 
-const parsed = {
-  header,
-  tags,
-};
+// const tags = parseTags(buffer.slice(21));
 
-console.log(JSON.stringify(parsed, null, 2));
+// const parsed = {
+//   header,
+//   tags,
+// };
+
+// console.log(JSON.stringify(parsed, null, 2));
+
+const decompiler = new Decompiler();
+const abc = decompiler.run(bc);
+console.log(JSON.stringify(abc, null, 2));
