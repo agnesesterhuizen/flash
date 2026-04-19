@@ -65,6 +65,71 @@ class AbcReader {
     this.pos += count;
     return slice;
   }
+
+  readTraits(): TraitInfo[] {
+    const traitCount = this.readU30();
+    const traits: TraitInfo[] = [];
+    for (let i = 0; i < traitCount; i++) {
+      const name = this.readU30();
+      const kindByte = this.readU8();
+      const kind = kindByte & 0x0f;
+      const attrs = (kindByte >> 4) & 0x0f;
+
+      let trait: TraitInfo;
+      switch (kind) {
+        case TraitKind.Slot:
+        case TraitKind.Const: {
+          const slotId = this.readU30();
+          const typeName = this.readU30();
+          const vindex = this.readU30();
+          const vkind = vindex !== 0 ? this.readU8() : 0;
+          trait = {
+            kind,
+            name,
+            attrs,
+            slotId,
+            typeName,
+            vindex,
+            vkind,
+            metadata: [],
+          };
+          break;
+        }
+        case TraitKind.Method:
+        case TraitKind.Getter:
+        case TraitKind.Setter: {
+          const dispId = this.readU30();
+          const method = this.readU30();
+          trait = { kind, name, attrs, dispId, method, metadata: [] };
+          break;
+        }
+        case TraitKind.Class: {
+          const slotId = this.readU30();
+          const classi = this.readU30();
+          trait = { kind, name, attrs, slotId, classi, metadata: [] };
+          break;
+        }
+        case TraitKind.Function: {
+          const slotId = this.readU30();
+          const fn = this.readU30();
+          trait = { kind, name, attrs, slotId, function: fn, metadata: [] };
+          break;
+        }
+        default:
+          throw new Error(`Unknown trait kind: ${kind}`);
+      }
+
+      if (attrs & TraitAttr.Metadata) {
+        const metadataCount = this.readU30();
+        for (let j = 0; j < metadataCount; j++) {
+          trait.metadata.push(this.readU30());
+        }
+      }
+
+      traits.push(trait);
+    }
+    return traits;
+  }
 }
 
 export type Multiname =
@@ -84,14 +149,158 @@ export interface ConstantPool {
   multinames: Multiname[];
 }
 
+export interface OptionDetail {
+  val: number;
+  kind: number;
+}
+
+export interface MethodInfo {
+  paramCount: number;
+  returnType: number;
+  paramTypes: number[];
+  name: number;
+  flags: number;
+  options: OptionDetail[];
+  paramNames: number[];
+}
+
+export const MethodFlags = {
+  NEED_ARGUMENTS: 0x01,
+  NEED_ACTIVATION: 0x02,
+  NEED_REST: 0x04,
+  HAS_OPTIONAL: 0x08,
+  SET_DXNS: 0x40,
+  HAS_PARAM_NAMES: 0x80,
+} as const;
+
+export interface MetadataInfo {
+  name: number;
+  items: { key: number; value: number }[];
+}
+
+export const TraitKind = {
+  Slot: 0,
+  Method: 1,
+  Getter: 2,
+  Setter: 3,
+  Class: 4,
+  Function: 5,
+  Const: 6,
+} as const;
+
+export const TraitAttr = {
+  Final: 0x1,
+  Override: 0x2,
+  Metadata: 0x4,
+} as const;
+
+export interface TraitSlot {
+  kind: typeof TraitKind.Slot | typeof TraitKind.Const;
+  name: number;
+  attrs: number;
+  slotId: number;
+  typeName: number;
+  vindex: number;
+  vkind: number;
+  metadata: number[];
+}
+
+export interface TraitMethod {
+  kind:
+    | typeof TraitKind.Method
+    | typeof TraitKind.Getter
+    | typeof TraitKind.Setter;
+  name: number;
+  attrs: number;
+  dispId: number;
+  method: number;
+  metadata: number[];
+}
+
+export interface TraitClass {
+  kind: typeof TraitKind.Class;
+  name: number;
+  attrs: number;
+  slotId: number;
+  classi: number;
+  metadata: number[];
+}
+
+export interface TraitFunction {
+  kind: typeof TraitKind.Function;
+  name: number;
+  attrs: number;
+  slotId: number;
+  function: number;
+  metadata: number[];
+}
+
+export type TraitInfo = TraitSlot | TraitMethod | TraitClass | TraitFunction;
+
+export const InstanceFlags = {
+  Sealed: 0x01,
+  Final: 0x02,
+  Interface: 0x04,
+  ProtectedNs: 0x08,
+} as const;
+
+export interface InstanceInfo {
+  name: number;
+  superName: number;
+  flags: number;
+  protectedNs: number;
+  interfaces: number[];
+  iinit: number;
+  traits: TraitInfo[];
+}
+
+export interface ClassInfo {
+  cinit: number;
+  traits: TraitInfo[];
+}
+
+export interface ScriptInfo {
+  init: number;
+  traits: TraitInfo[];
+}
+
+export interface ExceptionInfo {
+  from: number;
+  to: number;
+  target: number;
+  excType: number;
+  varName: number;
+}
+
+export interface MethodBodyInfo {
+  method: number;
+  maxStack: number;
+  localCount: number;
+  initScopeDepth: number;
+  maxScopeDepth: number;
+  code: Uint8Array;
+  exceptions: ExceptionInfo[];
+  traits: TraitInfo[];
+}
+
 export interface AbcFile {
   majorVersion: number;
   minorVersion: number;
   constantPool: ConstantPool;
-  methodCount: number;
+  methods: MethodInfo[];
+  metadata: MetadataInfo[];
+  instances: InstanceInfo[];
+  classes: ClassInfo[];
+  scripts: ScriptInfo[];
+  methodBodies: MethodBodyInfo[];
 }
 
 export class Decompiler {
+  static parseTraits(bytes: number[]): TraitInfo[] {
+    const reader = new AbcReader(new Uint8Array(bytes));
+    return reader.readTraits();
+  }
+
   run(bytecode: number[]): AbcFile {
     const data = new Uint8Array(bytecode);
     const reader = new AbcReader(data);
@@ -184,6 +393,132 @@ export class Decompiler {
     }
 
     const methodCount = reader.readU30();
+    const methods: MethodInfo[] = [];
+    for (let i = 0; i < methodCount; i++) {
+      const paramCount = reader.readU30();
+      const returnType = reader.readU30();
+      const paramTypes: number[] = [];
+      for (let j = 0; j < paramCount; j++) {
+        paramTypes.push(reader.readU30());
+      }
+      const name = reader.readU30();
+      const flags = reader.readU8();
+
+      let options: OptionDetail[] = [];
+      if (flags & MethodFlags.HAS_OPTIONAL) {
+        const optionCount = reader.readU30();
+        for (let j = 0; j < optionCount; j++) {
+          const val = reader.readU30();
+          const kind = reader.readU8();
+          options.push({ val, kind });
+        }
+      }
+
+      let paramNames: number[] = [];
+      if (flags & MethodFlags.HAS_PARAM_NAMES) {
+        for (let j = 0; j < paramCount; j++) {
+          paramNames.push(reader.readU30());
+        }
+      }
+
+      methods.push({
+        paramCount,
+        returnType,
+        paramTypes,
+        name,
+        flags,
+        options,
+        paramNames,
+      });
+    }
+
+    const metadataCount = reader.readU30();
+    const metadata: MetadataInfo[] = [];
+    for (let i = 0; i < metadataCount; i++) {
+      const name = reader.readU30();
+      const itemCount = reader.readU30();
+      const items: { key: number; value: number }[] = [];
+      for (let j = 0; j < itemCount; j++) {
+        const key = reader.readU30();
+        const value = reader.readU30();
+        items.push({ key, value });
+      }
+      metadata.push({ name, items });
+    }
+
+    const classCount = reader.readU30();
+    const instances: InstanceInfo[] = [];
+    for (let i = 0; i < classCount; i++) {
+      const name = reader.readU30();
+      const superName = reader.readU30();
+      const flags = reader.readU8();
+      const protectedNs =
+        flags & InstanceFlags.ProtectedNs ? reader.readU30() : 0;
+      const intrfCount = reader.readU30();
+      const interfaces: number[] = [];
+      for (let j = 0; j < intrfCount; j++) {
+        interfaces.push(reader.readU30());
+      }
+      const iinit = reader.readU30();
+      const traits = reader.readTraits();
+      instances.push({
+        name,
+        superName,
+        flags,
+        protectedNs,
+        interfaces,
+        iinit,
+        traits,
+      });
+    }
+
+    const classes: ClassInfo[] = [];
+    for (let i = 0; i < classCount; i++) {
+      const cinit = reader.readU30();
+      const traits = reader.readTraits();
+      classes.push({ cinit, traits });
+    }
+
+    const scriptCount = reader.readU30();
+    const scripts: ScriptInfo[] = [];
+    for (let i = 0; i < scriptCount; i++) {
+      const init = reader.readU30();
+      const traits = reader.readTraits();
+      scripts.push({ init, traits });
+    }
+
+    const methodBodyCount = reader.readU30();
+    const methodBodies: MethodBodyInfo[] = [];
+    for (let i = 0; i < methodBodyCount; i++) {
+      const method = reader.readU30();
+      const maxStack = reader.readU30();
+      const localCount = reader.readU30();
+      const initScopeDepth = reader.readU30();
+      const maxScopeDepth = reader.readU30();
+      const codeLength = reader.readU30();
+      const code = reader.readBytes(codeLength);
+      const exceptionCount = reader.readU30();
+      const exceptions: ExceptionInfo[] = [];
+      for (let j = 0; j < exceptionCount; j++) {
+        const from = reader.readU30();
+        const to = reader.readU30();
+        const target = reader.readU30();
+        const excType = reader.readU30();
+        const varName = reader.readU30();
+        exceptions.push({ from, to, target, excType, varName });
+      }
+      const traits = reader.readTraits();
+      methodBodies.push({
+        method,
+        maxStack,
+        localCount,
+        initScopeDepth,
+        maxScopeDepth,
+        code,
+        exceptions,
+        traits,
+      });
+    }
 
     return {
       majorVersion,
@@ -197,7 +532,12 @@ export class Decompiler {
         nsSets,
         multinames,
       },
-      methodCount,
+      methods,
+      metadata,
+      instances,
+      classes,
+      scripts,
+      methodBodies,
     };
   }
 }
