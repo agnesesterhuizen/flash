@@ -1681,12 +1681,113 @@ Deno.test("vm: newactivation creates empty object", () => {
   assertEquals(obj.proto, null);
 });
 
-Deno.test("vm: newclass throws STUB", () => {
-  assertThrows(
-    () => run(makeAbc({ code: [0x20, 0x58, 0x00, 0x48] })),
-    Error,
-    "STUB: newclass",
-  );
+Deno.test("vm: newclass creates class object with traits", () => {
+  // Build an ABC with a class: cinit is method 1 (returnvoid), iinit is method 2 (returnvoid)
+  const code = new Uint8Array([0x20, 0x58, 0x00, 0x48]); // pushnull, newclass 0, returnvalue
+  const cinitCode = new Uint8Array([0x47]); // returnvoid
+  const iinitCode = new Uint8Array([0x47]); // returnvoid
+  const abc: AbcFile = {
+    majorVersion: 46,
+    minorVersion: 16,
+    constantPool: {
+      integers: [],
+      uintegers: [],
+      doubles: [],
+      strings: ["MyClass"],
+      namespaces: [{ kind: 0x08, name: 0 }],
+      nsSets: [],
+      multinames: [
+        { kind: 0x07, ns: 1, name: 1 },
+      ] as AbcFile["constantPool"]["multinames"],
+    },
+    methods: [
+      {
+        paramCount: 0,
+        returnType: 0,
+        paramTypes: [],
+        name: 0,
+        flags: 0,
+        options: [],
+        paramNames: [],
+      },
+      {
+        paramCount: 0,
+        returnType: 0,
+        paramTypes: [],
+        name: 0,
+        flags: 0,
+        options: [],
+        paramNames: [],
+      },
+      {
+        paramCount: 0,
+        returnType: 0,
+        paramTypes: [],
+        name: 0,
+        flags: 0,
+        options: [],
+        paramNames: [],
+      },
+    ],
+    metadata: [],
+    instances: [
+      {
+        name: 1, // multiname index → "MyClass"
+        superName: 0,
+        flags: 0,
+        protectedNs: 0,
+        interfaces: [],
+        iinit: 2,
+        traits: [],
+      },
+    ],
+    classes: [
+      {
+        cinit: 1,
+        traits: [],
+      },
+    ],
+    scripts: [{ init: 0, traits: [] }],
+    methodBodies: [
+      {
+        method: 0,
+        maxStack: 10,
+        localCount: 1,
+        initScopeDepth: 0,
+        maxScopeDepth: 1,
+        code,
+        instructions: disassemble(code),
+        exceptions: [],
+        traits: [],
+      },
+      {
+        method: 1,
+        maxStack: 1,
+        localCount: 1,
+        initScopeDepth: 0,
+        maxScopeDepth: 0,
+        code: cinitCode,
+        instructions: disassemble(cinitCode),
+        exceptions: [],
+        traits: [],
+      },
+      {
+        method: 2,
+        maxStack: 1,
+        localCount: 1,
+        initScopeDepth: 0,
+        maxScopeDepth: 0,
+        code: iinitCode,
+        instructions: disassemble(iinitCode),
+        exceptions: [],
+        traits: [],
+      },
+    ],
+  };
+  const vm = new AVM(abc, stubHost());
+  const result = vm.runMethodBody(0) as AVMObject;
+  assertEquals(result.traits.get("__avmClass__") != null, true);
+  assertEquals(result.traits.get("__methodIndex__"), 2); // iinit
 });
 
 Deno.test("vm: newcatch creates catch scope", () => {

@@ -4,7 +4,9 @@ import type {
   MethodInfo,
   InstanceInfo,
   ClassInfo,
+  TraitInfo,
 } from "./decompiler.ts";
+import { TraitKind } from "./decompiler.ts";
 
 // ── Values ──
 
@@ -185,6 +187,21 @@ export class AVM {
     const obj: AVMObject = { traits: new Map(), proto: null, class: null };
     if (fn != null && typeof fn === "object") {
       const fnObj = fn as AVMObject;
+
+      // If fn is a newclass-created class object, use its prototype and avmClass
+      const avmClass = fnObj.traits.get("__avmClass__") as AVMClass | undefined;
+      const proto = fnObj.traits.get("__proto__") as AVMObject | undefined;
+      if (avmClass) {
+        obj.class = avmClass;
+        obj.proto = proto ?? fnObj;
+        // Install instance traits on the new object
+        this.installTraits(obj, avmClass.instance.traits);
+        // Run instance initializer (iinit)
+        const iinitBody = this.bodyByMethod.get(avmClass.instance.iinit);
+        if (iinitBody) this.executeMethod(iinitBody, obj, args);
+        return obj;
+      }
+
       const methodIdx = fnObj.traits.get("__methodIndex__");
       if (typeof methodIdx === "number") {
         const fnBody = this.bodyByMethod.get(methodIdx);
@@ -197,6 +214,84 @@ export class AVM {
     }
     // Fall through to host construction
     return this.host.constructHost(null as unknown as AVMClass, args);
+  }
+
+  /** Install ABC traits onto an AVMObject. */
+  private installTraits(obj: AVMObject, traits: TraitInfo[]): void {
+    const cp = this.abc.constantPool;
+    for (const trait of traits) {
+      const mn = cp.multinames[trait.name - 1];
+      let traitName = `?trait${trait.name}`;
+      if (mn && "name" in mn) {
+        traitName = cp.strings[(mn.name as number) - 1] ?? traitName;
+      }
+      switch (trait.kind) {
+        case TraitKind.Slot:
+        case TraitKind.Const: {
+          // Initialize slot with default value
+          let value: AVMValue = undefined;
+          if (trait.vindex > 0) {
+            value = this.resolveDefaultValue(trait.vkind, trait.vindex);
+          }
+          obj.traits.set(traitName, value);
+          if (trait.slotId > 0) {
+            obj.traits.set(`__slot_${trait.slotId}`, value);
+          }
+          break;
+        }
+        case TraitKind.Method:
+        case TraitKind.Getter:
+        case TraitKind.Setter: {
+          const fnObj: AVMObject = {
+            traits: new Map(),
+            proto: null,
+            class: null,
+          };
+          fnObj.traits.set("__methodIndex__", trait.method);
+          obj.traits.set(traitName, fnObj);
+          break;
+        }
+        case TraitKind.Class: {
+          // Class trait — will be populated by newclass opcode
+          break;
+        }
+        case TraitKind.Function: {
+          const fnObj: AVMObject = {
+            traits: new Map(),
+            proto: null,
+            class: null,
+          };
+          fnObj.traits.set("__methodIndex__", trait.function);
+          obj.traits.set(traitName, fnObj);
+          break;
+        }
+      }
+    }
+  }
+
+  /** Resolve a default value from the constant pool (for trait slot initializers). */
+  private resolveDefaultValue(vkind: number, vindex: number): AVMValue {
+    const cp = this.abc.constantPool;
+    switch (vkind) {
+      case 0x03:
+        return cp.integers[vindex - 1] ?? 0; // Int
+      case 0x04:
+        return cp.uintegers[vindex - 1] ?? 0; // UInt
+      case 0x06:
+        return cp.doubles[vindex - 1] ?? NaN; // Double
+      case 0x01:
+        return cp.strings[vindex - 1] ?? ""; // Utf8
+      case 0x0b:
+        return true; // True
+      case 0x0a:
+        return false; // False
+      case 0x0c:
+        return null; // Null
+      case 0x00:
+        return undefined; // Undefined
+      default:
+        return undefined;
+    }
   }
 
   private findScopeProperty(
@@ -937,12 +1032,8 @@ export class AVM {
             if (obj?.class?.baseClass) {
               const base = obj.class.baseClass;
               this.executeMethod(base.iinit, obj, args);
-            } else if (argCount > 0 || (obj && obj.class)) {
-              throw new Error(
-                `STUB: constructsuper — no base class to call (argCount=${argCount})`,
-              );
             }
-            // argCount=0 with no class hierarchy is the common "Object super()" case — safe to skip
+            // No base class = extends Object — safe to skip (Object has no iinit)
             break;
           }
           case 0x43: {
@@ -1121,10 +1212,105 @@ export class AVM {
           }
           case 0x58: {
             // newclass: class_index
-            const baseClass = stack.pop();
-            throw new Error(
-              `STUB: newclass not implemented (class_index=${ins.operands[0]}, baseClass=${baseClass})`,
+            const baseClassVal = stack.pop();
+            const classIndex = ins.operands[0];
+            const instanceInfo = this.abc.instances[classIndex];
+            const classInfo = this.abc.classes[classIndex];
+            if (!instanceInfo || !classInfo) {
+              throw new Error(
+                `newclass: no class/instance info at index ${classIndex}`,
+              );
+            }
+
+            // Resolve class name
+            const { name: className } = this.resolveMultiname(
+              instanceInfo.name,
             );
+
+            // Resolve base class
+            let baseAvmClass: AVMClass | null = null;
+            if (baseClassVal != null && typeof baseClassVal === "object") {
+              const baseObj = baseClassVal as AVMObject;
+              baseAvmClass =
+                baseObj.class ??
+                (baseObj.traits.get("__avmClass__") as AVMClass | undefined) ??
+                null;
+            }
+
+            // Find iinit/cinit bodies
+            const iinitBody = this.bodyByMethod.get(instanceInfo.iinit);
+            const cinitBody = this.bodyByMethod.get(classInfo.cinit);
+
+            // Create AVMClass
+            const avmClass: AVMClass = {
+              name: className,
+              instance: instanceInfo,
+              classInfo: classInfo,
+              baseClass: baseAvmClass,
+              iinit: iinitBody ?? {
+                method: instanceInfo.iinit,
+                maxStack: 0,
+                localCount: 1,
+                initScopeDepth: 0,
+                maxScopeDepth: 0,
+                code: new Uint8Array([0x47]),
+                instructions: [
+                  { offset: 0, opcode: 0x47, name: "returnvoid", operands: [] },
+                ],
+                exceptions: [],
+                traits: [],
+              },
+              cinit: cinitBody ?? {
+                method: classInfo.cinit,
+                maxStack: 0,
+                localCount: 1,
+                initScopeDepth: 0,
+                maxScopeDepth: 0,
+                code: new Uint8Array([0x47]),
+                instructions: [
+                  { offset: 0, opcode: 0x47, name: "returnvoid", operands: [] },
+                ],
+                exceptions: [],
+                traits: [],
+              },
+            };
+
+            // Build prototype from instance traits
+            const proto: AVMObject = {
+              traits: new Map(),
+              proto: null,
+              class: avmClass,
+            };
+            if (baseClassVal != null && typeof baseClassVal === "object") {
+              // Inherit from base prototype if available
+              const baseProto = (baseClassVal as AVMObject).traits.get(
+                "__proto__",
+              ) as AVMObject | undefined;
+              proto.proto = baseProto ?? (baseClassVal as AVMObject);
+            }
+            this.installTraits(proto, instanceInfo.traits);
+
+            // Build class object
+            const classObj: AVMObject = {
+              traits: new Map(),
+              proto: null,
+              class: null,
+            };
+            classObj.traits.set(
+              "__avmClass__",
+              avmClass as unknown as AVMValue,
+            );
+            classObj.traits.set("__methodIndex__", instanceInfo.iinit); // construct = iinit
+            classObj.traits.set("__proto__", proto as unknown as AVMValue);
+            this.installTraits(classObj, classInfo.traits);
+
+            // Run class initializer
+            if (cinitBody) {
+              this.executeMethod(cinitBody, classObj, []);
+            }
+
+            stack.push(classObj);
+            break;
           }
           case 0x5a: {
             // newcatch: exception_index — creates catch scope
