@@ -272,6 +272,13 @@ export interface ExceptionInfo {
   varName: number;
 }
 
+export interface Instruction {
+  offset: number;
+  opcode: number;
+  name: string;
+  operands: number[];
+}
+
 export interface MethodBodyInfo {
   method: number;
   maxStack: number;
@@ -279,6 +286,7 @@ export interface MethodBodyInfo {
   initScopeDepth: number;
   maxScopeDepth: number;
   code: Uint8Array;
+  instructions: Instruction[];
   exceptions: ExceptionInfo[];
   traits: TraitInfo[];
 }
@@ -293,6 +301,273 @@ export interface AbcFile {
   classes: ClassInfo[];
   scripts: ScriptInfo[];
   methodBodies: MethodBodyInfo[];
+}
+
+// Operand format types
+const enum OpFmt {
+  None, // no operands
+  U30, // single u30
+  U30x2, // two u30s
+  U8, // single u8
+  S24, // single s24 (3-byte signed)
+  Debug, // u8 + u30 + u8 + u30
+  LookupSwitch, // s24 default + u30 case_count + s24[case_count+1]
+}
+
+const opcodeTable: Map<number, [string, OpFmt]> = new Map([
+  // No operands
+  [0x02, ["nop", OpFmt.None]],
+  [0x03, ["throw", OpFmt.None]],
+  [0x07, ["dxnslate", OpFmt.None]],
+  [0x09, ["label", OpFmt.None]],
+  [0x1c, ["pushwith", OpFmt.None]],
+  [0x1d, ["popscope", OpFmt.None]],
+  [0x1e, ["nextname", OpFmt.None]],
+  [0x1f, ["hasnext", OpFmt.None]],
+  [0x20, ["pushnull", OpFmt.None]],
+  [0x21, ["pushundefined", OpFmt.None]],
+  [0x23, ["nextvalue", OpFmt.None]],
+  [0x26, ["pushtrue", OpFmt.None]],
+  [0x27, ["pushfalse", OpFmt.None]],
+  [0x28, ["pushnan", OpFmt.None]],
+  [0x29, ["pop", OpFmt.None]],
+  [0x2a, ["dup", OpFmt.None]],
+  [0x2b, ["swap", OpFmt.None]],
+  [0x30, ["pushscope", OpFmt.None]],
+  [0x47, ["returnvoid", OpFmt.None]],
+  [0x48, ["returnvalue", OpFmt.None]],
+  [0x57, ["newactivation", OpFmt.None]],
+  [0x64, ["getglobalscope", OpFmt.None]],
+  [0x70, ["convert_s", OpFmt.None]],
+  [0x71, ["esc_xelem", OpFmt.None]],
+  [0x72, ["esc_xattr", OpFmt.None]],
+  [0x73, ["convert_i", OpFmt.None]],
+  [0x74, ["convert_u", OpFmt.None]],
+  [0x75, ["convert_d", OpFmt.None]],
+  [0x76, ["convert_b", OpFmt.None]],
+  [0x77, ["convert_o", OpFmt.None]],
+  [0x78, ["checkfilter", OpFmt.None]],
+  [0x82, ["coerce_a", OpFmt.None]],
+  [0x85, ["coerce_s", OpFmt.None]],
+  [0x87, ["astypelate", OpFmt.None]],
+  [0x90, ["negate", OpFmt.None]],
+  [0x91, ["increment", OpFmt.None]],
+  [0x93, ["decrement", OpFmt.None]],
+  [0x95, ["typeof", OpFmt.None]],
+  [0x96, ["not", OpFmt.None]],
+  [0x97, ["bitnot", OpFmt.None]],
+  [0xa0, ["add", OpFmt.None]],
+  [0xa1, ["subtract", OpFmt.None]],
+  [0xa2, ["multiply", OpFmt.None]],
+  [0xa3, ["divide", OpFmt.None]],
+  [0xa4, ["modulo", OpFmt.None]],
+  [0xa5, ["lshift", OpFmt.None]],
+  [0xa6, ["rshift", OpFmt.None]],
+  [0xa7, ["urshift", OpFmt.None]],
+  [0xa8, ["bitand", OpFmt.None]],
+  [0xa9, ["bitor", OpFmt.None]],
+  [0xaa, ["bitxor", OpFmt.None]],
+  [0xab, ["equals", OpFmt.None]],
+  [0xac, ["strictequals", OpFmt.None]],
+  [0xad, ["lessthan", OpFmt.None]],
+  [0xae, ["lessequals", OpFmt.None]],
+  [0xaf, ["greaterthan", OpFmt.None]],
+  [0xb0, ["greaterequals", OpFmt.None]],
+  [0xb1, ["instanceof", OpFmt.None]],
+  [0xb3, ["istypelate", OpFmt.None]],
+  [0xb4, ["in", OpFmt.None]],
+  [0xc0, ["increment_i", OpFmt.None]],
+  [0xc1, ["decrement_i", OpFmt.None]],
+  [0xc4, ["negate_i", OpFmt.None]],
+  [0xc5, ["add_i", OpFmt.None]],
+  [0xc6, ["subtract_i", OpFmt.None]],
+  [0xc7, ["multiply_i", OpFmt.None]],
+  [0xd0, ["getlocal_0", OpFmt.None]],
+  [0xd1, ["getlocal_1", OpFmt.None]],
+  [0xd2, ["getlocal_2", OpFmt.None]],
+  [0xd3, ["getlocal_3", OpFmt.None]],
+  [0xd4, ["setlocal_0", OpFmt.None]],
+  [0xd5, ["setlocal_1", OpFmt.None]],
+  [0xd6, ["setlocal_2", OpFmt.None]],
+  [0xd7, ["setlocal_3", OpFmt.None]],
+
+  // Single u30
+  [0x04, ["getsuper", OpFmt.U30]],
+  [0x05, ["setsuper", OpFmt.U30]],
+  [0x06, ["dxns", OpFmt.U30]],
+  [0x08, ["kill", OpFmt.U30]],
+  [0x25, ["pushshort", OpFmt.U30]],
+  [0x2c, ["pushstring", OpFmt.U30]],
+  [0x2d, ["pushint", OpFmt.U30]],
+  [0x2e, ["pushuint", OpFmt.U30]],
+  [0x2f, ["pushdouble", OpFmt.U30]],
+  [0x31, ["pushnamespace", OpFmt.U30]],
+  [0x40, ["newfunction", OpFmt.U30]],
+  [0x41, ["call", OpFmt.U30]],
+  [0x42, ["construct", OpFmt.U30]],
+  [0x49, ["constructsuper", OpFmt.U30]],
+  [0x55, ["newobject", OpFmt.U30]],
+  [0x56, ["newarray", OpFmt.U30]],
+  [0x58, ["newclass", OpFmt.U30]],
+  [0x59, ["getdescendants", OpFmt.U30]],
+  [0x5a, ["newcatch", OpFmt.U30]],
+  [0x5d, ["findpropstrict", OpFmt.U30]],
+  [0x5e, ["findproperty", OpFmt.U30]],
+  [0x60, ["getlex", OpFmt.U30]],
+  [0x61, ["setproperty", OpFmt.U30]],
+  [0x62, ["getlocal", OpFmt.U30]],
+  [0x63, ["setlocal", OpFmt.U30]],
+  [0x66, ["getproperty", OpFmt.U30]],
+  [0x68, ["initproperty", OpFmt.U30]],
+  [0x6a, ["deleteproperty", OpFmt.U30]],
+  [0x6c, ["getslot", OpFmt.U30]],
+  [0x6d, ["setslot", OpFmt.U30]],
+  [0x6e, ["getglobalslot", OpFmt.U30]],
+  [0x6f, ["setglobalslot", OpFmt.U30]],
+  [0x80, ["coerce", OpFmt.U30]],
+  [0x86, ["astype", OpFmt.U30]],
+  [0x92, ["inclocal", OpFmt.U30]],
+  [0x94, ["declocal", OpFmt.U30]],
+  [0xb2, ["istype", OpFmt.U30]],
+  [0xc2, ["inclocal_i", OpFmt.U30]],
+  [0xc3, ["declocal_i", OpFmt.U30]],
+  [0xf0, ["debugline", OpFmt.U30]],
+  [0xf1, ["debugfile", OpFmt.U30]],
+
+  // Two u30s
+  [0x32, ["hasnext2", OpFmt.U30x2]],
+  [0x43, ["callmethod", OpFmt.U30x2]],
+  [0x44, ["callstatic", OpFmt.U30x2]],
+  [0x45, ["callsuper", OpFmt.U30x2]],
+  [0x46, ["callproperty", OpFmt.U30x2]],
+  [0x4a, ["constructprop", OpFmt.U30x2]],
+  [0x4c, ["callproplex", OpFmt.U30x2]],
+  [0x4e, ["callsupervoid", OpFmt.U30x2]],
+  [0x4f, ["callpropvoid", OpFmt.U30x2]],
+
+  // Single u8
+  [0x24, ["pushbyte", OpFmt.U8]],
+  [0x65, ["getscopeobject", OpFmt.U8]],
+
+  // Single s24 (branches)
+  [0x0c, ["ifnlt", OpFmt.S24]],
+  [0x0d, ["ifnle", OpFmt.S24]],
+  [0x0e, ["ifngt", OpFmt.S24]],
+  [0x0f, ["ifnge", OpFmt.S24]],
+  [0x10, ["jump", OpFmt.S24]],
+  [0x11, ["iftrue", OpFmt.S24]],
+  [0x12, ["iffalse", OpFmt.S24]],
+  [0x13, ["ifeq", OpFmt.S24]],
+  [0x14, ["ifne", OpFmt.S24]],
+  [0x15, ["iflt", OpFmt.S24]],
+  [0x16, ["ifle", OpFmt.S24]],
+  [0x17, ["ifgt", OpFmt.S24]],
+  [0x18, ["ifge", OpFmt.S24]],
+  [0x19, ["ifstricteq", OpFmt.S24]],
+  [0x1a, ["ifstrictne", OpFmt.S24]],
+
+  // Special
+  [0x1b, ["lookupswitch", OpFmt.LookupSwitch]],
+  [0xef, ["debug", OpFmt.Debug]],
+]);
+
+function readU30FromCode(code: Uint8Array, pos: number): [number, number] {
+  let result = 0;
+  let p = pos;
+  for (let i = 0; i < 5; i++) {
+    const byte = code[p++];
+    result |= (byte & 0x7f) << (7 * i);
+    if ((byte & 0x80) === 0) break;
+  }
+  return [result, p];
+}
+
+function readS24FromCode(code: Uint8Array, pos: number): [number, number] {
+  const lo = code[pos];
+  const mid = code[pos + 1];
+  const hi = code[pos + 2];
+  let value = lo | (mid << 8) | (hi << 16);
+  if (value & 0x800000) value |= ~0xffffff; // sign extend
+  return [value, pos + 3];
+}
+
+export function disassemble(code: Uint8Array): Instruction[] {
+  const instructions: Instruction[] = [];
+  let pos = 0;
+
+  while (pos < code.length) {
+    const offset = pos;
+    const opcode = code[pos++];
+    const entry = opcodeTable.get(opcode);
+    if (!entry) {
+      instructions.push({
+        offset,
+        opcode,
+        name: `unknown_0x${opcode.toString(16)}`,
+        operands: [],
+      });
+      continue;
+    }
+
+    const [name, fmt] = entry;
+    const operands: number[] = [];
+
+    switch (fmt) {
+      case OpFmt.None:
+        break;
+      case OpFmt.U30: {
+        const [v, p] = readU30FromCode(code, pos);
+        operands.push(v);
+        pos = p;
+        break;
+      }
+      case OpFmt.U30x2: {
+        const [v1, p1] = readU30FromCode(code, pos);
+        const [v2, p2] = readU30FromCode(code, p1);
+        operands.push(v1, v2);
+        pos = p2;
+        break;
+      }
+      case OpFmt.U8:
+        operands.push(code[pos++]);
+        break;
+      case OpFmt.S24: {
+        const [v, p] = readS24FromCode(code, pos);
+        operands.push(v);
+        pos = p;
+        break;
+      }
+      case OpFmt.Debug: {
+        // u8 debug_type, u30 index, u8 reg, u30 extra
+        operands.push(code[pos++]);
+        const [idx, p1] = readU30FromCode(code, pos);
+        operands.push(idx);
+        operands.push(code[p1]);
+        const [extra, p2] = readU30FromCode(code, p1 + 1);
+        operands.push(extra);
+        pos = p2;
+        break;
+      }
+      case OpFmt.LookupSwitch: {
+        // s24 default_offset, u30 case_count, s24[case_count+1] case_offsets
+        const [defaultOffset, p1] = readS24FromCode(code, pos);
+        operands.push(defaultOffset);
+        const [caseCount, p2] = readU30FromCode(code, p1);
+        operands.push(caseCount);
+        pos = p2;
+        for (let i = 0; i <= caseCount; i++) {
+          const [caseOffset, p3] = readS24FromCode(code, pos);
+          operands.push(caseOffset);
+          pos = p3;
+        }
+        break;
+      }
+    }
+
+    instructions.push({ offset, opcode, name, operands });
+  }
+
+  return instructions;
 }
 
 export class Decompiler {
@@ -508,6 +783,7 @@ export class Decompiler {
         exceptions.push({ from, to, target, excType, varName });
       }
       const traits = reader.readTraits();
+      const instructions = disassemble(code);
       methodBodies.push({
         method,
         maxStack,
@@ -515,6 +791,7 @@ export class Decompiler {
         initScopeDepth,
         maxScopeDepth,
         code,
+        instructions,
         exceptions,
         traits,
       });

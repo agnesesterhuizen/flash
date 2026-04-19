@@ -11,6 +11,8 @@ import {
   TraitAttr,
   type TraitInfo,
   InstanceFlags,
+  disassemble,
+  type Instruction,
 } from "./decompiler.ts";
 
 // Helper: encode a u30 value as variable-length bytes
@@ -1393,4 +1395,245 @@ Deno.test("parses multiple method bodies", () => {
   assertEquals(abc.methodBodies[1].maxStack, 5);
   assertEquals(abc.methodBodies[1].code, new Uint8Array([0xd0, 0x30, 0x47]));
   assertEquals(abc.methodBodies[2].exceptions.length, 1);
+});
+
+// ── disassemble tests ──
+
+Deno.test("disassemble: no-operand instructions", () => {
+  const code = new Uint8Array([
+    0x02, 0x20, 0x29, 0x2a, 0x30, 0x47, 0x48, 0xa0, 0xd0, 0xd7,
+  ]);
+  const ins = disassemble(code);
+  assertEquals(ins.length, 10);
+  assertEquals(ins[0], { offset: 0, opcode: 0x02, name: "nop", operands: [] });
+  assertEquals(ins[1], {
+    offset: 1,
+    opcode: 0x20,
+    name: "pushnull",
+    operands: [],
+  });
+  assertEquals(ins[2], { offset: 2, opcode: 0x29, name: "pop", operands: [] });
+  assertEquals(ins[3], { offset: 3, opcode: 0x2a, name: "dup", operands: [] });
+  assertEquals(ins[4], {
+    offset: 4,
+    opcode: 0x30,
+    name: "pushscope",
+    operands: [],
+  });
+  assertEquals(ins[5], {
+    offset: 5,
+    opcode: 0x47,
+    name: "returnvoid",
+    operands: [],
+  });
+  assertEquals(ins[6], {
+    offset: 6,
+    opcode: 0x48,
+    name: "returnvalue",
+    operands: [],
+  });
+  assertEquals(ins[7], { offset: 7, opcode: 0xa0, name: "add", operands: [] });
+  assertEquals(ins[8], {
+    offset: 8,
+    opcode: 0xd0,
+    name: "getlocal_0",
+    operands: [],
+  });
+  assertEquals(ins[9], {
+    offset: 9,
+    opcode: 0xd7,
+    name: "setlocal_3",
+    operands: [],
+  });
+});
+
+Deno.test("disassemble: single u30 operand", () => {
+  // pushstring 5
+  const code = new Uint8Array([0x2c, 0x05]);
+  const ins = disassemble(code);
+  assertEquals(ins.length, 1);
+  assertEquals(ins[0], {
+    offset: 0,
+    opcode: 0x2c,
+    name: "pushstring",
+    operands: [5],
+  });
+});
+
+Deno.test("disassemble: multi-byte u30 operand", () => {
+  // getproperty 300 (300 = 0x012c → encoded as [0xac, 0x02])
+  const code = new Uint8Array([0x66, 0xac, 0x02]);
+  const ins = disassemble(code);
+  assertEquals(ins.length, 1);
+  assertEquals(ins[0], {
+    offset: 0,
+    opcode: 0x66,
+    name: "getproperty",
+    operands: [300],
+  });
+});
+
+Deno.test("disassemble: two u30 operands", () => {
+  // callproperty name=3, argCount=2
+  const code = new Uint8Array([0x46, 0x03, 0x02]);
+  const ins = disassemble(code);
+  assertEquals(ins.length, 1);
+  assertEquals(ins[0], {
+    offset: 0,
+    opcode: 0x46,
+    name: "callproperty",
+    operands: [3, 2],
+  });
+});
+
+Deno.test("disassemble: u8 operand (pushbyte)", () => {
+  // pushbyte 42
+  const code = new Uint8Array([0x24, 42]);
+  const ins = disassemble(code);
+  assertEquals(ins.length, 1);
+  assertEquals(ins[0], {
+    offset: 0,
+    opcode: 0x24,
+    name: "pushbyte",
+    operands: [42],
+  });
+});
+
+Deno.test("disassemble: u8 operand (getscopeobject)", () => {
+  const code = new Uint8Array([0x65, 0x01]);
+  const ins = disassemble(code);
+  assertEquals(ins.length, 1);
+  assertEquals(ins[0], {
+    offset: 0,
+    opcode: 0x65,
+    name: "getscopeobject",
+    operands: [1],
+  });
+});
+
+Deno.test("disassemble: s24 branch (positive offset)", () => {
+  // jump +5 → s24 = [0x05, 0x00, 0x00]
+  const code = new Uint8Array([0x10, 0x05, 0x00, 0x00]);
+  const ins = disassemble(code);
+  assertEquals(ins.length, 1);
+  assertEquals(ins[0], {
+    offset: 0,
+    opcode: 0x10,
+    name: "jump",
+    operands: [5],
+  });
+});
+
+Deno.test("disassemble: s24 branch (negative offset)", () => {
+  // iffalse -3 → s24 = [0xfd, 0xff, 0xff]
+  const code = new Uint8Array([0x12, 0xfd, 0xff, 0xff]);
+  const ins = disassemble(code);
+  assertEquals(ins.length, 1);
+  assertEquals(ins[0], {
+    offset: 0,
+    opcode: 0x12,
+    name: "iffalse",
+    operands: [-3],
+  });
+});
+
+Deno.test("disassemble: debug instruction", () => {
+  // debug: debug_type=1, index=5, reg=2, extra=0
+  const code = new Uint8Array([0xef, 0x01, 0x05, 0x02, 0x00]);
+  const ins = disassemble(code);
+  assertEquals(ins.length, 1);
+  assertEquals(ins[0], {
+    offset: 0,
+    opcode: 0xef,
+    name: "debug",
+    operands: [1, 5, 2, 0],
+  });
+});
+
+Deno.test("disassemble: lookupswitch", () => {
+  // lookupswitch: default_offset=10 (s24), case_count=2 (u30), 3 case offsets (s24 each)
+  const code = new Uint8Array([
+    0x1b,
+    0x0a,
+    0x00,
+    0x00, // default_offset = 10
+    0x02, // case_count = 2
+    0x14,
+    0x00,
+    0x00, // case_offset[0] = 20
+    0x1e,
+    0x00,
+    0x00, // case_offset[1] = 30
+    0x28,
+    0x00,
+    0x00, // case_offset[2] = 40
+  ]);
+  const ins = disassemble(code);
+  assertEquals(ins.length, 1);
+  assertEquals(ins[0], {
+    offset: 0,
+    opcode: 0x1b,
+    name: "lookupswitch",
+    operands: [10, 2, 20, 30, 40],
+  });
+});
+
+Deno.test("disassemble: unknown opcode", () => {
+  const code = new Uint8Array([0xfe]);
+  const ins = disassemble(code);
+  assertEquals(ins.length, 1);
+  assertEquals(ins[0], {
+    offset: 0,
+    opcode: 0xfe,
+    name: "unknown_0xfe",
+    operands: [],
+  });
+});
+
+Deno.test("disassemble: mixed instruction sequence", () => {
+  // getlocal_0, pushscope, getlocal_0, constructsuper 0, returnvoid
+  const code = new Uint8Array([0xd0, 0x30, 0xd0, 0x49, 0x00, 0x47]);
+  const ins = disassemble(code);
+  assertEquals(ins.length, 5);
+  assertEquals(ins[0].name, "getlocal_0");
+  assertEquals(ins[1].name, "pushscope");
+  assertEquals(ins[2].name, "getlocal_0");
+  assertEquals(ins[3], {
+    offset: 3,
+    opcode: 0x49,
+    name: "constructsuper",
+    operands: [0],
+  });
+  assertEquals(ins[4], {
+    offset: 5,
+    opcode: 0x47,
+    name: "returnvoid",
+    operands: [],
+  });
+});
+
+Deno.test("disassemble: empty code", () => {
+  const ins = disassemble(new Uint8Array([]));
+  assertEquals(ins, []);
+});
+
+Deno.test("disassemble: instructions field populated in MethodBodyInfo", () => {
+  const abc = new Decompiler().run(
+    buildMinimalAbc({
+      methods: [buildMethodInfo({})],
+      scripts: [buildScriptInfo({ init: 0 })],
+      methodBodies: [
+        buildMethodBodyInfo({
+          method: 0,
+          code: [0xd0, 0x30, 0x49, 0x00, 0x47],
+        }),
+      ],
+    }),
+  );
+  assertEquals(abc.methodBodies[0].instructions.length, 4);
+  assertEquals(abc.methodBodies[0].instructions[0].name, "getlocal_0");
+  assertEquals(abc.methodBodies[0].instructions[1].name, "pushscope");
+  assertEquals(abc.methodBodies[0].instructions[2].name, "constructsuper");
+  assertEquals(abc.methodBodies[0].instructions[2].operands, [0]);
+  assertEquals(abc.methodBodies[0].instructions[3].name, "returnvoid");
 });
